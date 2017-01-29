@@ -1,0 +1,10 @@
+c:\users\root960\documents\visual studio 2015\Projects\MFDataParser\MFDataParser\bin\Debug\MFDataParser.exe.config
+c:\users\root960\documents\visual studio 2015\Projects\MFDataParser\MFDataParser\bin\Debug\MFDataParser.exe
+c:\users\root960\documents\visual studio 2015\Projects\MFDataParser\MFDataParser\bin\Debug\MFDataParser.pdb
+c:\users\root960\documents\visual studio 2015\Projects\MFDataParser\MFDataParser\obj\Debug\MFDataParser.csprojResolveAssemblyReference.cache
+c:\users\root960\documents\visual studio 2015\Projects\MFDataParser\MFDataParser\obj\Debug\MFDataParser.exe
+c:\users\root960\documents\visual studio 2015\Projects\MFDataParser\MFDataParser\obj\Debug\MFDataParser.pdb
+C:\Users\root960\Documents\Visual Studio 2015\Projects\MFDataParser\MFDataParser\bin\Debug\EntityFramework.dll
+C:\Users\root960\Documents\Visual Studio 2015\Projects\MFDataParser\MFDataParser\bin\Debug\EntityFramework.SqlServer.dll
+C:\Users\root960\Documents\Visual Studio 2015\Projects\MFDataParser\MFDataParser\bin\Debug\EntityFramework.xml
+C:\Users\root960\Documents\Visual Studio 2015\Projects\MFDataParser\MFDataParser\bin\Debug\EntityFramework.SqlServer.xml
