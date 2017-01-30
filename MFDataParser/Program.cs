@@ -1,12 +1,18 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Data.Entity;
 namespace MFDataParser
 {
+   enum MFFileType
+    {
+        GameData=0, HeadSetData=1
+    }
 
     enum EventDataIndex
     {
@@ -20,20 +26,113 @@ namespace MFDataParser
 
     class Program
     {
+        
+        static Regex ParticipantIdRegex = new Regex("\\d{10}");
+        static Regex HeadsetFileRegex = new Regex("headset");
 
         static string pathToGameEventData = null;
         static string pathToHeadsetData = null;
+        static Dictionary<String, Participant> Participants = new Dictionary<string, Participant>();
 
         static void Main(string[] args)
         {
+
+            LoadParticipants();
+            PrintParticipants();
+
+
+
+        }
+
+        static void PrintParticipants()
+        {
+            foreach (var kvp in Participants)
+            {
+                Console.WriteLine("{0}: {1}", kvp.Key, kvp.Value.ToString());
+            }
+        }
+
+
+        static void LoadParticipants()
+        {
+            //load directories
+            string[] files = Directory.GetFiles("C:/Users/root960/Desktop/MFData/test");
+
+      
+            foreach(string file in files)
+            {
+                //parse the participant number.
+                string participantNumber = ParseParticipantNumber(file);
+                //if we have a participant object associated with this number, then get it.
+                Participant participant;
+                if (!Participants.TryGetValue(participantNumber, out participant))
+                {
+                    InitializeParticipant(participantNumber, out participant);
+                    Participants.Add(participantNumber, participant);
+                }
+
+                SaveFilePathToParticipant(ref participant, file);
+               
+            }
+          
+        }
+
+
+        static void InitializeParticipant(string participantNumber, out Participant participant)
+        {
+            int IdAsInt;
+         
+            if (Int32.TryParse(participantNumber, out IdAsInt))
+            {
+                participant = new Participant
+                {
+                    Id = IdAsInt,
+                    Sessions = new List<Session>(),
+                    HeadetDataFiles = new List<String>(),
+                    GameDataFiles = new List<String>()
+                };
+            }
+            else throw new FormatException("Unable to convert participant Id string: " + participantNumber + " into int.");
+
+        }
+
+        static void SaveFilePathToParticipant(ref Participant participant, string file) {
+            MFFileType fileType = ParseFileType(file);
+            switch (fileType)
+            {
+                case MFFileType.GameData:
+                    participant.GameDataFiles.Add(file);
+                    break;
+                case MFFileType.HeadSetData:
+                    participant.HeadetDataFiles.Add(file);
+                    break;
+            }
+        }
+
+        static string ParseParticipantNumber(string file)
+        {
+
+            return ParticipantIdRegex.Match(file).ToString();
+        }
+
+        static MFFileType ParseFileType(string file)
+        {
+            return (HeadsetFileRegex.IsMatch(file) ? MFFileType.HeadSetData : MFFileType.GameData);
+        }
+
+
+
+        static void runTest()
+        {//may need to load in the contents of the directory
             pathToGameEventData = "C:/Users/root960/Desktop/MFData/1420008612_17_09Feb15_1122_game.csv";
             pathToHeadsetData = pathToGameEventData.Replace("game", "headset");
 
+
+            //for each child, for each session, parse the child's session
+
+
             ParseSession(0);//doesn't really matter right now
 
-
-
-            
         }
 
 
@@ -237,6 +336,7 @@ class MFEntity
                 {
                     builder.Append(prop.Name);
                     builder.Append(": ");
+               
                     builder.Append(prop.GetValue(this));
                     builder.Append("\n");
                 }
@@ -254,7 +354,49 @@ class MFEntity
     class Participant : MFEntity
     {
         public int Id { get; set; }
+        public string Name { get; set; }
+        public int Group { get; set; }
         public List<Session> Sessions { get; set; }
+
+        public List<String> GameDataFiles { get; set; }
+        public List<String> HeadetDataFiles { get; set; }
+
+        public override bool Equals(object obj)
+        {
+            if (obj == null || obj.GetType() != GetType()) return false;
+            Participant other = (Participant)obj;
+            return other.Id == other.Id;
+        }
+
+
+        public override int GetHashCode()
+        {
+
+            return Id;
+        }
+
+
+        public override string ToString()
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.Append(base.ToString());
+            builder.Append("Files:");
+            foreach (string hsfile in HeadetDataFiles)
+            {
+                builder.Append("\t");
+                builder.Append(hsfile);
+            }
+            foreach (string hsfile in GameDataFiles)
+            {
+                builder.Append("\t");
+                builder.Append(hsfile);
+
+            }
+
+            return builder.ToString();
+
+        }
+
     }
 
 
