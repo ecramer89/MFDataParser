@@ -39,48 +39,40 @@ namespace MFDataParser
         {
 
             LoadParticipants();
-            LoadParticipantData();
+            LoadParticipantsData();
             PrintParticipants();
 
 
 
         }
 
-        static void LoadParticipantData()
+        static void LoadParticipantsData()
         {
             foreach(Participant p in Participants.Values)
             {
-                LoadParticipantGameData(p);
-                LoadParticipantHeadSetData(p);
+                LoadParticipantData(p);
             }
         }
 
-        static void LoadParticipantGameData(Participant participant)
-        { 
-            foreach(string gameDataFile in participant.GameDataFiles)
-            {
-                int session = ParseSessionNumber(gameDataFile);
-            }
+     
 
-        }
-
-        static void LoadParticipantHeadSetData(Participant participant)
+        static void LoadParticipantData(Participant p)
         {
-            foreach(string headsetDataFile in participant.HeadetDataFiles)
+            foreach(var sessionAndFiles in p.DataFilesForSession)
             {
-
+                Session session;
+                ParseDataForSession(out session, sessionAndFiles.Key, sessionAndFiles.Value);
+                p.Sessions.Add(session);
             }
-
         }
-
-
 
 
         static void PrintParticipants()
         {
+          
             foreach (var kvp in Participants)
             {
-                Console.WriteLine("{0}: {1}", kvp.Key, kvp.Value.ToString());
+                Console.WriteLine("Participant: {0} {1}", kvp.Key, kvp.Value.ToString());
             }
         }
 
@@ -120,8 +112,8 @@ namespace MFDataParser
                 {
                     Id = IdAsInt,
                     Sessions = new List<Session>(),
-                    HeadetDataFiles = new List<String>(),
-                    GameDataFiles = new List<String>()
+                    DataFilesForSession = new Dictionary<int, SessionDataFiles>(),
+                  
                 };
             }
             else throw new FormatException("Unable to convert participant Id string: " + participantNumber + " into int.");
@@ -129,14 +121,24 @@ namespace MFDataParser
         }
 
         static void SaveFilePathToParticipant(ref Participant participant, string file) {
+            int sessionNumber = ParseSessionNumber(file);
+            SessionDataFiles dataFiles;
+            if (!participant.DataFilesForSession.TryGetValue(sessionNumber, out dataFiles))
+            {
+                dataFiles = new SessionDataFiles();
+                participant.DataFilesForSession.Add(sessionNumber, dataFiles);
+            }
+
             MFFileType fileType = ParseFileType(file);
             switch (fileType)
             {
                 case MFFileType.GameData:
-                    participant.GameDataFiles.Add(file);
+                    dataFiles.GameDataFile = file;
+                    //participant.GameDataFiles.Add(file);
                     break;
                 case MFFileType.HeadSetData:
-                    participant.HeadetDataFiles.Add(file);
+                    dataFiles.HeadsetDataFile = file;
+                   // participant.HeadetDataFiles.Add(file);
                     break;
             }
         }
@@ -155,44 +157,25 @@ namespace MFDataParser
         static int ParseSessionNumber(string filePath)
         {
             string sessionNumberAsString = SessionNumberRegex.Match(filePath).ToString().Replace("_", "");
-
-        }
-
-        static void runTest()
-        {//may need to load in the contents of the directory
-            pathToGameEventData = "C:/Users/root960/Desktop/MFData/1420008612_17_09Feb15_1122_game.csv";
-            pathToHeadsetData = pathToGameEventData.Replace("game", "headset");
-
-
-            //for each child, for each session, parse the child's session
-
-
-            ParseSession(0);//doesn't really matter right now
-
-        }
-
-
-        static Session ParseSession(int sessionNumber)
-        {
-            var session = InitializeSession(sessionNumber);
-
-            ParseGameStartTimesFor(session);
-
-          
-            ParseHeadsetDataFor(session);
-
-            //check results
-            //BTW: remember that you cannot define any methods or calculated fields on the anonymous type, nor could you successfully pass them to a method if you wanted to create a 
-            //convenient "toString" method. I'm also not convinced that you would be able to save an anonymous type to a database in ORM.
-            var games = from game in session.Games select new { MAR = game.MAR, Name = game.Name, SecondsDuration = game.TotalSeconds, NumPoorQual = game.NumPoorQuality };
-            foreach (var item in games)
+            int sessionNumber;
+            if (Int32.TryParse(sessionNumberAsString, out sessionNumber))
             {
-                Console.WriteLine("Name: {0}. MAR: {1}. TotalTime: {2}. NumPoorQuality: {3}", item.Name, item.MAR, item.SecondsDuration, item.NumPoorQual);
+                return sessionNumber;
             }
-
-            return session;
+            else throw new FormatException("Error attempting to pare session number from string: " + sessionNumberAsString);
         }
 
+    
+
+        static void ParseDataForSession(out Session session, int sessionNumber, SessionDataFiles sessionDataFiles)
+        {
+            session = InitializeSession(sessionNumber);
+            ParseGameStartTimesFor(session, sessionDataFiles.GameDataFile);
+            ParseHeadsetDataFor(session, sessionDataFiles.HeadsetDataFile);
+
+        }
+
+      
 
         static Session InitializeSession(int sessionNumber)
         {
@@ -224,7 +207,7 @@ namespace MFDataParser
             return session;
         }
 
-        static void ParseFileFor(string pathToFile, Session session, Action<string[]> lineHandler, Action endOfFileHandler=null)
+        static void ParseFileFor(string pathToFile, Session session, Action<string[]> lineHandler)
         {
             StreamReader reader = CreateReaderForFile(pathToFile);
             while (!reader.EndOfStream)
@@ -232,22 +215,22 @@ namespace MFDataParser
                 string[] eventData = reader.ReadLine().Split(',');
                 lineHandler(eventData);
             }
-            if(endOfFileHandler!=null) endOfFileHandler();
+          
             reader.Close();
         }
 
-        static void ParseGameStartTimesFor(Session session)
+        static void ParseGameStartTimesFor(Session session, string pathToGameEventData="")
         {
             Game current;
-            int idx = 0;
+            int currentGameIdx = 0;
             Action<string[]> lineHandler = (string[] eventData) =>
             {
-                if (eventData.Length == 2 && eventData[(int)EventDataIndex.EventType].Contains("started"))
-                {
-                    current = session.Games[idx];
-                    current.Name = eventData[(int)EventDataIndex.EventType].Split(' ')[0];
+                if (IsStartOfNewGame(eventData))
+                {   //idx starts at 0, not ++idx, because we need to account for the first row, which indicates the start of the first game.
+                    current = session.Games[currentGameIdx];
+                    current.Name = ParseNameOfGameFromGameStartedEvent(eventData);
                     current.StartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
-                    idx++;
+                    currentGameIdx++;
 
                 }
             };
@@ -256,24 +239,34 @@ namespace MFDataParser
 
         }
 
-        static void ParseHeadsetDataFor(Session session)
+        static string ParseNameOfGameFromGameStartedEvent(string[] eventData)
         {
-             int idx = 0;
-             Game currentGame = session.Games[idx];
+            return eventData[(int)EventDataIndex.EventType].Split(' ')[0];
+        }
+
+        static bool IsStartOfNewGame(string[] eventData)
+        {
+            return eventData.Length == 2 && eventData[(int)EventDataIndex.EventType].Contains("started");
+        }
+
+        static void ParseHeadsetDataFor(Session session, string pathToHeadsetData)
+        {
+             int currentGameIdx = 0;
+             Game currentGame = session.Games[currentGameIdx];
           
             Action<string[]> lineHandler = (string[] headSetData) => {
                 
-                if (AtNextGame(headSetData, session, currentGame, idx))
+                if (AtNextGame(headSetData, session, currentGame, currentGameIdx))
                 {
-                    GetNextGame(ref currentGame, ref idx, session);
+                    GetNextGame(ref currentGame, ref currentGameIdx, session);
                 }
 
                 if (DataIsReliable(headSetData))
                 {
-                    ParseAOrRGivenGame(currentGame, headSetData, idx);
+                    ParseAOrRGivenGame(currentGame, headSetData, currentGameIdx);
                 } else
                 {
-                    currentGame.NumPoorQuality++;
+                    currentGame.SecondsPoorQuality++;
                 }
 
                 currentGame.TotalSeconds++;
@@ -372,11 +365,12 @@ class MFEntity
                 var props = System.Reflection.Assembly.GetExecutingAssembly().GetType(this.GetType().ToString()).GetProperties();
                 foreach (var prop in props)
                 {
+                    builder.Append("\n\t");
                     builder.Append(prop.Name);
                     builder.Append(": ");
                
                     builder.Append(prop.GetValue(this));
-                    builder.Append("\n");
+                  
                 }
                 AsString = builder.ToString();
             }
@@ -386,6 +380,16 @@ class MFEntity
         }
     }
 
+    class SessionDataFiles
+    {
+        public string GameDataFile { get; set; }
+        public string HeadsetDataFile { get; set; }
+
+        public override string ToString()
+        {
+            return "Game Data File: "+GameDataFile+"\n\t\tHeadset Data File: " + HeadsetDataFile;
+        }
+    }
 
 
     //Domain Models
@@ -396,8 +400,8 @@ class MFEntity
         public int Group { get; set; }
         public List<Session> Sessions { get; set; }
 
-        public List<String> GameDataFiles { get; set; }
-        public List<String> HeadetDataFiles { get; set; }
+        public Dictionary<int, SessionDataFiles> DataFilesForSession;
+
 
         public override bool Equals(object obj)
         {
@@ -418,19 +422,22 @@ class MFEntity
         {
             StringBuilder builder = new StringBuilder();
             builder.Append(base.ToString());
-            builder.Append("Files:");
-            foreach (string hsfile in HeadetDataFiles)
+            builder.Append("\n");
+            builder.Append("Files: ");
+            foreach (var sessionData in DataFilesForSession)
             {
-                builder.Append("\t");
-                builder.Append(hsfile);
+                builder.Append("\n\tSession Number: ");
+                builder.Append(sessionData.Key);
+                builder.Append("\n\t\t");
+                builder.Append(sessionData.Value.ToString());
             }
-            foreach (string hsfile in GameDataFiles)
+            builder.Append("\nSessions: ");
+            foreach(Session session in Sessions)
             {
-                builder.Append("\t");
-                builder.Append(hsfile);
-
+                builder.Append("\nSession:");
+                builder.Append(session.ToString());
             }
-
+       
             return builder.ToString();
 
         }
@@ -445,6 +452,21 @@ class MFEntity
         public int Number { get; set; }
         public Game[] Games { get; set; }
 
+        public override string ToString()
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.Append(base.ToString());
+            builder.Append("\nGame Data: ");
+            foreach(Game game in Games)
+            {
+                builder.Append("\nGame:");
+                builder.Append(game.ToString());
+            }
+
+
+            return builder.ToString();
+        }
+
     }
 
     class Game : MFEntity
@@ -453,16 +475,13 @@ class MFEntity
         public DateTime StartTime { get; set; }
         public string Name { get; set;}
         public int MARSum { get; set; }
-        public int MAR { get { return MARSum / NumGoodQuality; } }
+        public int MAR { get { return (SecondsGoodQuality > 0 ? MARSum / SecondsGoodQuality : 0); } }
         public int PARSum { get; set; }
         public double PAR { get; set; }
         public int TT { get; set; }
-        public int NumPoorQuality { get; set; }
+        public int SecondsPoorQuality { get; set; }
         public int TotalSeconds { get; set; }
-        public int NumGoodQuality { get { return TotalSeconds - NumPoorQuality; } }
-        
-
-
+        public int SecondsGoodQuality { get { return TotalSeconds - SecondsPoorQuality; } }
 
 
     }
