@@ -45,11 +45,14 @@ namespace MFDataParser
 
           
             ParseHeadsetDataFor(session);
-        
+
             //check results
-            foreach (Game g in session.Games)
+            //BTW: remember that you cannot define any methods or calculated fields on the anonymous type, nor could you successfully pass them to a method if you wanted to create a 
+            //convenient "toString" method. I'm also not convinced that you would be able to save an anonymous type to a database in ORM.
+            var games = from game in session.Games select new { MAR = game.MAR, Name = game.Name, SecondsDuration = game.TotalSeconds, NumPoorQual = game.NumPoorQuality };
+            foreach (var item in games)
             {
-                Console.WriteLine(g.ToString());
+                Console.WriteLine("Name: {0}. MAR: {1}. TotalTime: {2}. NumPoorQuality: {3}", item.Name, item.MAR, item.SecondsDuration, item.NumPoorQual);
             }
         }
 
@@ -120,7 +123,7 @@ namespace MFDataParser
         {
              int idx = 0;
              Game currentGame = session.Games[idx];
-            int[] ARTalliesPerGame = new int[session.Games.Count()];
+          
             Action<string[]> lineHandler = (string[] headSetData) => {
                 
                 if (AtNextGame(headSetData, session, currentGame, idx))
@@ -130,7 +133,7 @@ namespace MFDataParser
 
                 if (DataIsReliable(headSetData))
                 {
-                    ParseAOrRGivenGame(currentGame, headSetData, ref ARTalliesPerGame, idx);
+                    ParseAOrRGivenGame(currentGame, headSetData, idx);
                 } else
                 {
                     currentGame.NumPoorQuality++;
@@ -139,12 +142,9 @@ namespace MFDataParser
                 currentGame.TotalSeconds++;
             };
 
-            Action endLineHandler = () =>
-            {
-                CalculateAndSaveAggregateGameData(session, ARTalliesPerGame);
-            };
+        
 
-            ParseFileFor(pathToHeadsetData, session, lineHandler, endLineHandler);
+            ParseFileFor(pathToHeadsetData, session, lineHandler);
 
         }
 
@@ -203,27 +203,21 @@ namespace MFDataParser
         }
 
 
-        static void ParseAOrRGivenGame(Game currentGame, string[] headSetData, ref int[] ARTalliesPerGame, int idx)
+        static void ParseAOrRGivenGame(Game currentGame, string[] headSetData, int idx)
         {
             int valueIdx = (int)(currentGame.Name == "Rock" ? HeadsetDataIndex.Attention : HeadsetDataIndex.Relaxation);
             string dataString = headSetData[valueIdx];
             int value;
             if (Int32.TryParse(dataString.Substring(5, dataString.Length - 5), out value))
                {
-                currentGame.MAR += value;
-                ARTalliesPerGame[idx]++;
+                currentGame.MARSum += value;
+                
             
                }
    
         }
 
-        static void CalculateAndSaveAggregateGameData(Session session, int[] ARTalliesPerGame)
-        {
-            for(int i = 0; i < session.Games.Count(); i++) 
-            {  
-                session.Games[i].CalculateMAR(ARTalliesPerGame[i]);
-            }
-        }
+        
     }
 
  
@@ -278,19 +272,16 @@ class MFEntity
         public int Id { get; set; }
         public DateTime StartTime { get; set; }
         public string Name { get; set;}
-        public int MAR { get; set; }
+        public int MARSum { get; set; }
+        public int MAR { get { return MARSum / NumGoodQuality; } }
+        public int PARSum { get; set; }
         public double PAR { get; set; }
         public int TT { get; set; }
         public int NumPoorQuality { get; set; }
         public int TotalSeconds { get; set; }
+        public int NumGoodQuality { get { return TotalSeconds - NumPoorQuality; } }
         
 
-        public void CalculateMAR(int timesMeasured)
-        {
-            this.MAR = this.MAR / timesMeasured;
-        }
-
-        
 
 
 
