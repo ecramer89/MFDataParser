@@ -31,8 +31,7 @@ namespace MFDataParser
         static Regex HeadsetFileRegex = new Regex("headset");
         static Regex SessionNumberRegex = new Regex("(_)(\\d{1,2})(_)");
 
-        static string pathToGameEventData = null;
-        static string pathToHeadsetData = null;
+  
         static Dictionary<String, Participant> Participants = new Dictionary<string, Participant>();
 
         static void Main(string[] args)
@@ -162,7 +161,7 @@ namespace MFDataParser
             {
                 return sessionNumber;
             }
-            else throw new FormatException("Error attempting to pare session number from string: " + sessionNumberAsString);
+            else throw new FormatException("Error attempting to parse session number from string: " + sessionNumberAsString);
         }
 
     
@@ -170,7 +169,7 @@ namespace MFDataParser
         static void ParseDataForSession(out Session session, int sessionNumber, SessionDataFiles sessionDataFiles)
         {
             session = InitializeSession(sessionNumber);
-            ParseGameStartTimesFor(session, sessionDataFiles.GameDataFile);
+            InitializeSessionGamesAndStartTimesFromFile(session, sessionDataFiles.GameDataFile);
             ParseHeadsetDataFor(session, sessionDataFiles.HeadsetDataFile);
 
         }
@@ -183,24 +182,7 @@ namespace MFDataParser
             {
                 Number = sessionNumber, //we would know this, having constructed the path to the session data, for now just hard code
 
-                Games = new Game[]{
-                     new Game
-                    {
-                        Name="Pinwheel",
-                     
-                    },
-                    new Game
-                    {
-                        Name="Paraglider",
-                        
-                    },
-                    new Game
-                    {
-                        Name="Pinwheel"
-                      
-                    }
-
-                }
+                Games = new List<Game>()
 
             };
 
@@ -219,19 +201,17 @@ namespace MFDataParser
             reader.Close();
         }
 
-        static void ParseGameStartTimesFor(Session session, string pathToGameEventData="")
+        static void InitializeSessionGamesAndStartTimesFromFile(Session session, string pathToGameEventData="")
         {
-            Game current;
-            int currentGameIdx = 0;
+          
             Action<string[]> lineHandler = (string[] eventData) =>
             {
                 if (IsStartOfNewGame(eventData))
                 {   //idx starts at 0, not ++idx, because we need to account for the first row, which indicates the start of the first game.
-                    current = session.Games[currentGameIdx];
-                    current.Name = ParseNameOfGameFromGameStartedEvent(eventData);
-                    current.StartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
-                    currentGameIdx++;
-
+                    string gameName= ParseNameOfGameFromGameStartedEvent(eventData);
+                    DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
+                    Game game = new Game { Name = gameName, StartTime = gameStartTime };
+                    session.Games.Add(game);
                 }
             };
 
@@ -257,7 +237,7 @@ namespace MFDataParser
             Action<string[]> lineHandler = (string[] headSetData) => {
                 
                 if (AtNextGame(headSetData, session, currentGame, currentGameIdx))
-                {
+                {   
                     GetNextGame(ref currentGame, ref currentGameIdx, session);
                 }
 
@@ -450,7 +430,7 @@ class MFEntity
     {
         public int Id { get; set; }
         public int Number { get; set; }
-        public Game[] Games { get; set; }
+        public List<Game> Games { get; set; }
 
         public override string ToString()
         {
