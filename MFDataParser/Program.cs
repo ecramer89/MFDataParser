@@ -29,6 +29,7 @@ namespace MFDataParser
         
         static Regex ParticipantIdRegex = new Regex("\\d{10}");
         static Regex HeadsetFileRegex = new Regex("headset");
+        static Regex SessionNumberRegex = new Regex("(_)(\\d{1,2})(_)");
 
         static string pathToGameEventData = null;
         static string pathToHeadsetData = null;
@@ -38,11 +39,42 @@ namespace MFDataParser
         {
 
             LoadParticipants();
+            LoadParticipantData();
             PrintParticipants();
 
 
 
         }
+
+        static void LoadParticipantData()
+        {
+            foreach(Participant p in Participants.Values)
+            {
+                LoadParticipantGameData(p);
+                LoadParticipantHeadSetData(p);
+            }
+        }
+
+        static void LoadParticipantGameData(Participant participant)
+        { 
+            foreach(string gameDataFile in participant.GameDataFiles)
+            {
+                int session = ParseSessionNumber(gameDataFile);
+            }
+
+        }
+
+        static void LoadParticipantHeadSetData(Participant participant)
+        {
+            foreach(string headsetDataFile in participant.HeadetDataFiles)
+            {
+
+            }
+
+        }
+
+
+
 
         static void PrintParticipants()
         {
@@ -120,7 +152,11 @@ namespace MFDataParser
             return (HeadsetFileRegex.IsMatch(file) ? MFFileType.HeadSetData : MFFileType.GameData);
         }
 
+        static int ParseSessionNumber(string filePath)
+        {
+            string sessionNumberAsString = SessionNumberRegex.Match(filePath).ToString().Replace("_", "");
 
+        }
 
         static void runTest()
         {//may need to load in the contents of the directory
@@ -136,7 +172,7 @@ namespace MFDataParser
         }
 
 
-        static void ParseSession(int sessionNumber)
+        static Session ParseSession(int sessionNumber)
         {
             var session = InitializeSession(sessionNumber);
 
@@ -153,6 +189,8 @@ namespace MFDataParser
             {
                 Console.WriteLine("Name: {0}. MAR: {1}. TotalTime: {2}. NumPoorQuality: {3}", item.Name, item.MAR, item.SecondsDuration, item.NumPoorQual);
             }
+
+            return session;
         }
 
 
