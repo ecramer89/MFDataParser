@@ -131,7 +131,12 @@ namespace MFDataParser
                 if (DataIsReliable(headSetData))
                 {
                     ParseAOrRGivenGame(currentGame, headSetData, ref ARTalliesPerGame, idx);
+                } else
+                {
+                    currentGame.NumPoorQuality++;
                 }
+
+                currentGame.TotalSeconds++;
             };
 
             Action endLineHandler = () =>
@@ -276,6 +281,8 @@ class MFEntity
         public int MAR { get; set; }
         public double PAR { get; set; }
         public int TT { get; set; }
+        public int NumPoorQuality { get; set; }
+        public int TotalSeconds { get; set; }
         
 
         public void CalculateMAR(int timesMeasured)
