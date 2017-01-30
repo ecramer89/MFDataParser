@@ -46,6 +46,7 @@ namespace MFDataParser
           
             ParseHeadsetDataFor(session);
         
+            //check results
             foreach (Game g in session.Games)
             {
                 Console.WriteLine(g.ToString());
@@ -275,11 +276,14 @@ class MFEntity
         public int MAR { get; set; }
         public double PAR { get; set; }
         public int TT { get; set; }
+        
 
         public void CalculateMAR(int timesMeasured)
         {
             this.MAR = this.MAR / timesMeasured;
         }
+
+        
 
 
 
