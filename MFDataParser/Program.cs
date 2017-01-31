@@ -14,6 +14,11 @@ namespace MFDataParser
         GameData=0, HeadSetData=1
     }
 
+    enum ParticipantIDToNameAndGroupIndex
+    {
+        ID=0, Name=1, Group=2
+    }
+
     enum EventDataIndex
     {
         EventTime, EventType
@@ -24,6 +29,12 @@ namespace MFDataParser
         EventTime=0, SignalQuality=2, Relaxation=3, Attention=4
     }
 
+    class ParticipantNameAndGroup
+    {
+        public string Name { get; set; }
+        public int Group { get; set; }
+    }
+
     class Program
     {
         
@@ -31,11 +42,18 @@ namespace MFDataParser
         static Regex HeadsetFileRegex = new Regex("headset");
         static Regex SessionNumberRegex = new Regex("(_)(\\d{1,2})(_)");
 
-  
+        static string PathToParticipantIdToNameAndGroupFile= "C:/Users/root960/Desktop/MFData/ParticipantIdToNameAndGroup.csv";
+        static Dictionary<int, ParticipantNameAndGroup> ParticipantNameAndGroupLookup = new Dictionary<int, ParticipantNameAndGroup>();
         static Dictionary<String, Participant> Participants = new Dictionary<string, Participant>();
 
         static void Main(string[] args)
         {
+            LoadParticipantIDToNameAndGroupData();
+            foreach(var kvp in ParticipantNameAndGroupLookup)
+            {
+                Console.WriteLine("ID: {0}; Name: {1}; Group: {2}", kvp.Key, kvp.Value.Name, kvp.Value.Group);
+            }
+
 
             LoadParticipants();
             LoadParticipantsData();
@@ -43,6 +61,44 @@ namespace MFDataParser
 
 
 
+        }
+
+
+        static void LoadParticipantIDToNameAndGroupData()
+        {
+            //static void ParseCSVFileFor(string pathToFile, Action<string[]> lineHandler)
+            Action<string[]> addIdAndNameGroupToDictionary = (string[] eventData) => {
+
+                int participantId;
+                if(!Int32.TryParse(eventData[(int)ParticipantIDToNameAndGroupIndex.ID], out participantId)){
+                    throw new FormatException("Error attempting to parse Participant Id from ID to Name and Group sheet.");
+                }
+
+                string participantName = eventData[(int)ParticipantIDToNameAndGroupIndex.Name];
+
+                int participantGroup;
+                if (!Int32.TryParse(eventData[(int)ParticipantIDToNameAndGroupIndex.Group], out participantGroup)){
+                    throw new FormatException("Error attempting to parse Participant Group from ID to Name and Group sheet.");
+                }
+
+                ParticipantNameAndGroup nameAndGroup= new ParticipantNameAndGroup
+                {
+                    Name=participantName,
+                    Group=participantGroup
+                };
+
+                try
+                {
+                    ParticipantNameAndGroupLookup.Add(participantId, nameAndGroup);
+                }catch(Exception e)
+                {
+                    Console.WriteLine(e.Message);
+                    Console.WriteLine("Duplicate Id was: {0}, Name was: {1}", participantId, participantName, participantGroup);
+                }
+
+            };
+
+            ParseCSVFileFor(PathToParticipantIdToNameAndGroupFile, addIdAndNameGroupToDictionary);
         }
 
         static void LoadParticipantsData()
@@ -79,9 +135,16 @@ namespace MFDataParser
         static void LoadParticipants()
         {
             //load directories
-            string[] files = Directory.GetFiles("C:/Users/root960/Desktop/MFData/test");
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles("C:/Users/root960/Desktop/MFData/test");
+            }catch (Exception e)
+            {
+                throw new Exception(e.Message+"\nCheck that the string identifying the root directory of the MF files is accurate.");
+            }
 
-      
+            
             foreach(string file in files)
             {
                 //parse the participant number.
@@ -110,10 +173,29 @@ namespace MFDataParser
                 participant = new Participant
                 {
                     Id = IdAsInt,
+
                     Sessions = new List<Session>(),
                     DataFilesForSession = new Dictionary<int, SessionDataFiles>(),
-                  
+
                 };
+
+
+                ParticipantNameAndGroup nameAndGroup;
+                if (ParticipantNameAndGroupLookup.TryGetValue(IdAsInt, out nameAndGroup))
+                {
+                    participant.Name = nameAndGroup.Name;
+                    participant.Group = nameAndGroup.Group;
+
+                }
+                else
+                {
+                    Console.WriteLine("Participant ID {0} was not registered in the Id to Name and Group Dictionary.", IdAsInt);
+                   
+                }
+
+
+
+
             }
             else throw new FormatException("Unable to convert participant Id string: " + participantNumber + " into int.");
 
@@ -189,7 +271,7 @@ namespace MFDataParser
             return session;
         }
 
-        static void ParseFileFor(string pathToFile, Session session, Action<string[]> lineHandler)
+        static void ParseCSVFileFor(string pathToFile, Action<string[]> lineHandler)
         {
             StreamReader reader = CreateReaderForFile(pathToFile);
             while (!reader.EndOfStream)
@@ -215,7 +297,7 @@ namespace MFDataParser
                 }
             };
 
-            ParseFileFor(pathToGameEventData, session, lineHandler);
+            ParseCSVFileFor(pathToGameEventData, lineHandler);
 
         }
 
@@ -254,13 +336,20 @@ namespace MFDataParser
 
         
 
-            ParseFileFor(pathToHeadsetData, session, lineHandler);
+            ParseCSVFileFor(pathToHeadsetData, lineHandler);
 
         }
 
         static StreamReader CreateReaderForFile(string filePath)
         {
-            FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite);
+            FileStream fs;
+            try
+            {
+                fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite);
+            } catch(Exception e)
+            {
+                throw new Exception(e.Message + " .Unable to locate: " + filePath + ". Verify that the ParticipantIDToNameAndGroupFile is in the same directory as the A and B directories.");
+            }
 
             StreamReader reader = new StreamReader(fs);
 
@@ -321,17 +410,12 @@ namespace MFDataParser
             if (Int32.TryParse(dataString.Substring(5, dataString.Length - 5), out value))
                {
                 currentGame.MARSum += value;
-                
-            
                }
-   
-        }
-
-        
+        }   
     }
 
  
-
+//Classes
 
 class MFEntity
     {
@@ -376,8 +460,8 @@ class MFEntity
     class Participant : MFEntity
     {
         public int Id { get; set; }
-        public string Name { get; set; }
-        public int Group { get; set; }
+        public string Name { get; set; } = "Unknown";
+        public int Group { get; set; } = -1;
         public List<Session> Sessions { get; set; }
 
         public Dictionary<int, SessionDataFiles> DataFilesForSession;
