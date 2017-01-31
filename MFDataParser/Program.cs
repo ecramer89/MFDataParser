@@ -29,15 +29,24 @@ namespace MFDataParser
         EventTime=0, SignalQuality=2, Relaxation=3, Attention=4
     }
 
+    class GameType
+    {
+        public static readonly string Rock="Rock";
+        public static readonly string Pinwheel = "Pinwheel";
+        public static readonly string Paraglider = "Paraglider";
+    }
+
     class ParticipantNameAndGroup
     {
         public string Name { get; set; }
         public int Group { get; set; }
     }
 
+
+
     class Program
     {
-        
+       
         static Regex ParticipantIdRegex = new Regex("\\d{10}");
         static Regex HeadsetFileRegex = new Regex("headset");
         static Regex SessionNumberRegex = new Regex("(_)(\\d{1,2})(_)");
@@ -49,12 +58,6 @@ namespace MFDataParser
         static void Main(string[] args)
         {
             LoadParticipantIDToNameAndGroupData();
-            foreach(var kvp in ParticipantNameAndGroupLookup)
-            {
-                Console.WriteLine("ID: {0}; Name: {1}; Group: {2}", kvp.Key, kvp.Value.Name, kvp.Value.Group);
-            }
-
-
             LoadParticipants();
             LoadParticipantsData();
             PrintParticipants();
@@ -66,7 +69,7 @@ namespace MFDataParser
 
         static void LoadParticipantIDToNameAndGroupData()
         {
-            //static void ParseCSVFileFor(string pathToFile, Action<string[]> lineHandler)
+          
             Action<string[]> addIdAndNameGroupToDictionary = (string[] eventData) => {
 
                 int participantId;
@@ -215,11 +218,9 @@ namespace MFDataParser
             {
                 case MFFileType.GameData:
                     dataFiles.GameDataFile = file;
-                    //participant.GameDataFiles.Add(file);
                     break;
                 case MFFileType.HeadSetData:
                     dataFiles.HeadsetDataFile = file;
-                   // participant.HeadetDataFiles.Add(file);
                     break;
             }
         }
@@ -264,7 +265,7 @@ namespace MFDataParser
             {
                 Number = sessionNumber, //we would know this, having constructed the path to the session data, for now just hard code
 
-                Games = new List<Game>()
+                Games = new List<SessionGame>()
 
             };
 
@@ -285,20 +286,71 @@ namespace MFDataParser
 
         static void InitializeSessionGamesAndStartTimesFromFile(Session session, string pathToGameEventData="")
         {
-          
+            const int inGameEvent = 0;
+            const int inNonGameEvent = 1;
+            int state = inGameEvent;
+            SessionGame currentGame = null;
+            TimeRange currentNonEventTimeRange = null;
             Action<string[]> lineHandler = (string[] eventData) =>
-            {
-                if (IsStartOfNewGame(eventData))
-                {   //idx starts at 0, not ++idx, because we need to account for the first row, which indicates the start of the first game.
-                    string gameName= ParseNameOfGameFromGameStartedEvent(eventData);
-                    DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
-                    Game game = new Game { Name = gameName, StartTime = gameStartTime };
-                    session.Games.Add(game);
-                }
+            {   
+                //actually, this has to be nested in with the check of the overall state as well.
+        
+             
+                    switch (state)
+                    {
+                        case inGameEvent:
+                        if (IsStartOfNewGame(eventData))
+                        {   //idx starts at 0, not ++idx, because we need to account for the first row, which indicates the start of the first game.
+                            string gameName = ParseNameOfGameFromGameStartedEvent(eventData);
+                            DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
+                            SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime };
+                            session.Games.Add(game);
+                            currentGame = game;
+                        } else if (IsNonGameEvent(eventData))
+                        {
+                            TimeSpan eventTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]).TimeOfDay;
+                            currentNonEventTimeRange = new TimeRange { Start = eventTime, End = eventTime.Clone() };
+                            state = inNonGameEvent;
+
+                        }
+
+                        break;
+                        case inNonGameEvent:
+                            //if the current event isn't a game event (and we're still in this state)
+                            //then add the timespan of the current date to the cached end time
+                            if (IsNonGameEvent(eventData))
+                            {
+                                TimeSpan eventTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]).TimeOfDay;
+                                currentNonEventTimeRange.End.Add(eventTime);
+                            }
+                            else
+                            {
+                                currentGame.NonGameEventTimeRanges.Add(currentNonEventTimeRange);
+                                state = inGameEvent;
+                               if (IsStartOfNewGame(eventData))
+                                {   //idx starts at 0, not ++idx, because we need to account for the first row, which indicates the start of the first game.
+                                    string gameName = ParseNameOfGameFromGameStartedEvent(eventData);
+                                    DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
+                                    SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime };
+                                    session.Games.Add(game);
+                                    currentGame = game;
+                                }
+                        }
+                        
+                            break;
+                    }
+                
+
+
             };
 
             ParseCSVFileFor(pathToGameEventData, lineHandler);
 
+        }
+
+        static bool IsNonGameEvent(string[] eventData)
+        {
+            throw new NotImplementedException();
         }
 
         static string ParseNameOfGameFromGameStartedEvent(string[] eventData)
@@ -314,30 +366,48 @@ namespace MFDataParser
         static void ParseHeadsetDataFor(Session session, string pathToHeadsetData)
         {
              int currentGameIdx = 0;
-             Game currentGame = session.Games[currentGameIdx];
+             SessionGame currentGame = session.Games[currentGameIdx];
           
             Action<string[]> lineHandler = (string[] headSetData) => {
-                
-                if (AtNextGame(headSetData, session, currentGame, currentGameIdx))
+
+                DateTime timeOfEvent = ParseDateTime(headSetData[(int)HeadsetDataIndex.EventTime]);
+
+                if (AtNextGame(timeOfEvent, session, currentGame, currentGameIdx))
                 {   
                     GetNextGame(ref currentGame, ref currentGameIdx, session);
                 }
 
-                if (DataIsReliable(headSetData))
-                {
-                    ParseAOrRGivenGame(currentGame, headSetData, currentGameIdx);
-                } else
-                {
-                    currentGame.SecondsPoorQuality++;
+                if (RowRepresentsTrueGamePlayAndNotNavigationOrRestart(currentGame, timeOfEvent)) {
+                    if (DataIsReliable(headSetData))
+                    {
+                        ParseAOrRGivenGame(currentGame, headSetData, currentGameIdx);
+                    } else
+                    {
+                        currentGame.SecondsPoorQuality++;
+                    }
+                    //we compute the total duration of the game empirically, as the sum of all rows that are valid gameplay.
+                    //it is not computed from the StartTime, which is only used to tell when we're at the next game.
+                    currentGame.TotalSeconds++;
                 }
-
-                currentGame.TotalSeconds++;
             };
 
         
 
             ParseCSVFileFor(pathToHeadsetData, lineHandler);
 
+        }
+
+         static bool RowRepresentsTrueGamePlayAndNotNavigationOrRestart(SessionGame currentGame, DateTime timeOfEvent)
+        {
+            
+            //1. when getting the general game data, record for each game the time spans when non game play events were occurring.
+            //2. get the date time of the event in this row. if the date time (or just time, date is irrelevant) is in any of the timespans
+            //then it is not valid
+            foreach(TimeRange rangeOfNonGameEvent in currentGame.NonGameEventTimeRanges)
+            {
+                if (timeOfEvent.TimeOfDay > rangeOfNonGameEvent.Start && timeOfEvent.TimeOfDay < rangeOfNonGameEvent.End) return false;
+            }
+            return true;
         }
 
         static StreamReader CreateReaderForFile(string filePath)
@@ -359,9 +429,9 @@ namespace MFDataParser
 
        
 
-       static bool AtNextGame(string[] headSetData, Session session, Game currentGame, int idx)
+       static bool AtNextGame(DateTime time, Session session, SessionGame currentGame, int idx)
         {
-            DateTime time = ParseDateTime(headSetData[(int)HeadsetDataIndex.EventTime]);
+          
             return ((idx + 1) < session.Games.Count() && time.CompareTo(session.Games[idx + 1].StartTime) >= 0) ;
 
         }
@@ -369,7 +439,7 @@ namespace MFDataParser
     
    
 
-        static void GetNextGame(ref Game currentGame, ref int idx, Session session)
+        static void GetNextGame(ref SessionGame currentGame, ref int idx, Session session)
         {
             currentGame = session.Games[++idx];
         }
@@ -402,9 +472,9 @@ namespace MFDataParser
         }
 
 
-        static void ParseAOrRGivenGame(Game currentGame, string[] headSetData, int idx)
+        static void ParseAOrRGivenGame(SessionGame currentGame, string[] headSetData, int idx)
         {
-            int valueIdx = (int)(currentGame.Name == "Rock" ? HeadsetDataIndex.Attention : HeadsetDataIndex.Relaxation);
+            int valueIdx = (int)(currentGame.Name == GameType.Rock ? HeadsetDataIndex.Attention : HeadsetDataIndex.Relaxation);
             string dataString = headSetData[valueIdx];
             int value;
             if (Int32.TryParse(dataString.Substring(5, dataString.Length - 5), out value))
@@ -514,14 +584,14 @@ class MFEntity
     {
         public int Id { get; set; }
         public int Number { get; set; }
-        public List<Game> Games { get; set; }
+        public List<SessionGame> Games { get; set; }
 
         public override string ToString()
         {
             StringBuilder builder = new StringBuilder();
             builder.Append(base.ToString());
             builder.Append("\nGame Data: ");
-            foreach(Game game in Games)
+            foreach(SessionGame game in Games)
             {
                 builder.Append("\nGame:");
                 builder.Append(game.ToString());
@@ -533,7 +603,8 @@ class MFEntity
 
     }
 
-    class Game : MFEntity
+    //represents a session of play for a particular game and for a particular child.
+    class SessionGame : MFEntity
     {
         public int Id { get; set; }
         public DateTime StartTime { get; set; }
@@ -546,10 +617,23 @@ class MFEntity
         public int SecondsPoorQuality { get; set; }
         public int TotalSeconds { get; set; }
         public int SecondsGoodQuality { get { return TotalSeconds - SecondsPoorQuality; } }
-
+        public HashSet<TimeRange> NonGameEventTimeRanges = new HashSet<TimeRange>();
 
     }
 
+    class TimeRange
+    {
+        public TimeSpan Start { get; set; }
+        public TimeSpan End { get; set; }
+    }
+
+    public static class Extension
+    {
+        public static TimeSpan Clone(this TimeSpan t)
+        {
+            return new TimeSpan(t.Hours, t.Minutes, t.Seconds, t.Milliseconds);
+        }
+    }
 
   
 }
