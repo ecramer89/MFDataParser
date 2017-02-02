@@ -19,6 +19,34 @@ namespace MFDataParser
         ID=0, Name=1, Group=2
     }
 
+    class EventDataType
+    {
+        public static readonly EventDataType StartGame = new EventDataType { value = 0 };
+        public static readonly EventDataType InGame = new EventDataType { value = 1 };
+        public static readonly EventDataType BetweenGame = new EventDataType { value = 2 };
+        public int value { get; set; }
+
+        public static EventDataType EventDataToEventType(string[] eventData)
+        {
+            string eventString = eventData[(int)EventDataIndex.EventType];
+            if (IsStartOfNewGame(eventData, eventString)) return StartGame;
+            if (IsGameEvent(eventString)) return InGame;
+            return BetweenGame;
+
+        }
+
+
+        static bool IsGameEvent(string eventString)
+        {
+            return eventString.Contains("token");
+        }
+
+        static bool IsStartOfNewGame(string[] eventData, string eventString)
+        {
+            return eventData.Length == 2 && eventString.Contains("started");
+        }
+    }
+
     enum EventDataIndex
     {
         EventTime, EventType
@@ -284,84 +312,79 @@ namespace MFDataParser
             reader.Close();
         }
 
-        static void InitializeSessionGamesAndStartTimesFromFile(Session session, string pathToGameEventData="")
+        static void InitializeSessionGamesAndStartTimesFromFile(Session session, string pathToGameEventData = "")
         {
             const int inGameEvent = 0;
             const int inNonGameEvent = 1;
+
             int state = inGameEvent;
+
             SessionGame currentGame = null;
             TimeRange currentNonEventTimeRange = null;
+
+
             Action<string[]> lineHandler = (string[] eventData) =>
-            {   
-                //actually, this has to be nested in with the check of the overall state as well.
-        
-             
-                    switch (state)
+            {
+                EventDataType eventType = EventDataType.EventDataToEventType(eventData);
+                if (eventType == EventDataType.StartGame)
+                {
+                    AddFinishedGameToSessionAndUpdateCurrentGame(eventData, out currentGame, ref session);
+
+                    if (state == inNonGameEvent)
                     {
-                        case inGameEvent:
-                        if (IsStartOfNewGame(eventData))
-                        {   //idx starts at 0, not ++idx, because we need to account for the first row, which indicates the start of the first game.
-                            string gameName = ParseNameOfGameFromGameStartedEvent(eventData);
-                            DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
-                            SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime };
-                            session.Games.Add(game);
-                            currentGame = game;
-                        } else if (IsNonGameEvent(eventData))
-                        {
-                            TimeSpan eventTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]).TimeOfDay;
-                            currentNonEventTimeRange = new TimeRange { Start = eventTime, End = eventTime.Clone() };
-                            state = inNonGameEvent;
-
-                        }
-
-                        break;
-                        case inNonGameEvent:
-                            //if the current event isn't a game event (and we're still in this state)
-                            //then add the timespan of the current date to the cached end time
-                            if (IsNonGameEvent(eventData))
-                            {
-                                TimeSpan eventTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]).TimeOfDay;
-                                currentNonEventTimeRange.End.Add(eventTime);
-                            }
-                            else
-                            {
-                                currentGame.NonGameEventTimeRanges.Add(currentNonEventTimeRange);
-                                state = inGameEvent;
-                               if (IsStartOfNewGame(eventData))
-                                {   //idx starts at 0, not ++idx, because we need to account for the first row, which indicates the start of the first game.
-                                    string gameName = ParseNameOfGameFromGameStartedEvent(eventData);
-                                    DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
-                                    SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime };
-                                    session.Games.Add(game);
-                                    currentGame = game;
-                                }
-                        }
-                        
-                            break;
+                        ToggleState(ref state);
                     }
-                
+                }
+                else if (eventType == EventDataType.InGame)
+                {
+                    if (state == inNonGameEvent)
+                    {
+                        currentGame.NonGameEventTimeRanges.Add(currentNonEventTimeRange);
+                        ToggleState(ref state);
 
+                    }
 
-            };
-
+                }
+                else if (eventType == EventDataType.BetweenGame)
+                {
+                    if (state == inGameEvent)
+                    {
+                        ToggleState(ref state);
+                    }
+                    else if (state == inNonGameEvent)
+                    {
+                        TimeSpan eventTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]).TimeOfDay;
+                        currentNonEventTimeRange.End.Add(eventTime);
+                    }
+                }
+            } //end delegate
             ParseCSVFileFor(pathToGameEventData, lineHandler);
-
         }
+           
 
-        static bool IsNonGameEvent(string[] eventData)
+        static void ToggleState(ref int state)
         {
-            throw new NotImplementedException();
+            state = 1 - state;
         }
+
+            static void AddFinishedGameToSessionAndUpdateCurrentGame(string[] eventData, out SessionGame currentGame, ref Session session)
+        {
+            string gameName = ParseNameOfGameFromGameStartedEvent(eventData);
+            DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
+            SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime };
+            session.Games.Add(game);
+            currentGame = game;
+
+        }
+
+     
 
         static string ParseNameOfGameFromGameStartedEvent(string[] eventData)
         {
             return eventData[(int)EventDataIndex.EventType].Split(' ')[0];
         }
 
-        static bool IsStartOfNewGame(string[] eventData)
-        {
-            return eventData.Length == 2 && eventData[(int)EventDataIndex.EventType].Contains("started");
-        }
+    
 
         static void ParseHeadsetDataFor(Session session, string pathToHeadsetData)
         {
