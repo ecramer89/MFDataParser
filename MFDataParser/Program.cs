@@ -78,20 +78,43 @@ namespace MFDataParser
         static Regex ParticipantIdRegex = new Regex("\\d{10}");
         static Regex HeadsetFileRegex = new Regex("headset");
         static Regex SessionNumberRegex = new Regex("(_)(\\d{1,2})(_)");
+        static Regex DateRegex = new Regex("\\d{2,4}-\\d{1,2}-\\d{1,2}");
+        static Regex TimeRegex = new Regex("\\d{1,2}:\\d{1,2}(:\\d{0,2})?");
+        static Regex DuplicateFileRegex = new Regex("(\\(\\d\\))$");
 
+        static string OutputFilePath ="C:/Users/root960/Desktop/MFData/Output.csv";
         static string PathToParticipantIdToNameAndGroupFile= "C:/Users/root960/Desktop/MFData/ParticipantIdToNameAndGroup.csv";
         static Dictionary<int, ParticipantNameAndGroup> ParticipantNameAndGroupLookup = new Dictionary<int, ParticipantNameAndGroup>();
         static Dictionary<String, Participant> Participants = new Dictionary<string, Participant>();
+        static int SerializedUnknownParticipant = 0;
 
         static void Main(string[] args)
         {
             LoadParticipantIDToNameAndGroupData();
             LoadParticipants();
             LoadParticipantsData();
-            PrintParticipants();
+           // PrintParticipants();
+            WriteParticipantDataToNewCSVFile();
+        }
 
+        static void WriteParticipantDataToNewCSVFile()
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("Name,ID,Group,Session,Game,SecondsPoorSignal,SecondsTotal");
+            foreach(Participant participant in Participants.Values)
+            {
+                foreach(Session session in participant.Sessions)
+                {
+                    foreach(SessionGame sessionGame in session.Games)
+                    {
+                        string row = String.Format("{0},{1},{2},{3},{4},{5},{6}", participant.Name, participant.Id, participant.Group, session.Number, sessionGame.Name, sessionGame.SecondsPoorQuality, sessionGame.TotalSeconds);
+                        builder.AppendLine(row);
+                    }
+                }
 
+            }
 
+            File.WriteAllText(OutputFilePath, builder.ToString());
         }
 
 
@@ -167,31 +190,59 @@ namespace MFDataParser
         {
             //load directories
             string[] files;
+          
             try
             {
-                files = Directory.GetFiles("C:/Users/root960/Desktop/MFData/test");
-            }catch (Exception e)
+                files = Directory.GetFiles("C:/Users/root960/Desktop/MFData/files");
+                Console.WriteLine("Number of files: "+files.Count());
+            }
+            catch (Exception e)
             {
                 throw new Exception(e.Message+"\nCheck that the string identifying the root directory of the MF files is accurate.");
             }
 
-            
-            foreach(string file in files)
+            int countfiles = 0;
+            StringBuilder rejectedFiles = new StringBuilder();
+            foreach (string file in files)
             {
-                //parse the participant number.
-                string participantNumber = ParseParticipantNumber(file);
-                //if we have a participant object associated with this number, then get it.
-                Participant participant;
-                if (!Participants.TryGetValue(participantNumber, out participant))
+                if (!IsADuplicateFile(file) && IsAParticipantDataFile(file))
                 {
-                    InitializeParticipant(participantNumber, out participant);
-                    Participants.Add(participantNumber, participant);
+                    InitializeNewParticipantForFileOrSaveFileToExistingParticipant(file);
+                    countfiles++;
+                }else
+                {
+                    rejectedFiles.AppendLine(file);
                 }
-
-                SaveFilePathToParticipant(ref participant, file);
-               
             }
+
+            File.WriteAllText("C:/Users/root960/Desktop/MFData/skipped.csv", rejectedFiles.ToString());
+            Console.WriteLine("Num participant files " + countfiles);
           
+        }
+
+        static void InitializeNewParticipantForFileOrSaveFileToExistingParticipant(string file)
+        {
+            //parse the participant number.
+            string participantNumber = ParseParticipantNumber(file);
+            //if we have a participant object associated with this number, then get it.
+            Participant participant;
+            if (!Participants.TryGetValue(participantNumber, out participant))
+            {
+                InitializeParticipant(participantNumber, out participant);
+                Participants.Add(participantNumber, participant);
+            }
+
+            SaveFilePathToParticipant(ref participant, file);
+        }
+
+        static bool IsADuplicateFile(string fileName)
+        {
+            return DuplicateFileRegex.IsMatch(fileName);
+        }
+
+        static bool IsAParticipantDataFile(string fileName)
+        {
+            return ParticipantIdRegex.IsMatch(fileName); 
         }
 
 
@@ -220,38 +271,52 @@ namespace MFDataParser
                 }
                 else
                 {
+                    participant.Name = "UK" + SerializedUnknownParticipant++;
                     Console.WriteLine("Participant ID {0} was not registered in the Id to Name and Group Dictionary.", IdAsInt);
                    
                 }
-
-
-
 
             }
             else throw new FormatException("Unable to convert participant Id string: " + participantNumber + " into int.");
 
         }
 
+
+
         static void SaveFilePathToParticipant(ref Participant participant, string file) {
             int sessionNumber = ParseSessionNumber(file);
-            SessionDataFiles dataFiles;
-            if (!participant.DataFilesForSession.TryGetValue(sessionNumber, out dataFiles))
+            SessionDataFiles participantDataFilesForSession;
+            GetOrInitializeDataFilesObjectForParticipantAndSession(out participantDataFilesForSession, ref participant, sessionNumber);
+            SetOrOverwriteGameOrHeadsetDataFileForParticipantAndSession(file, ref participantDataFilesForSession);
+        }
+
+        static void GetOrInitializeDataFilesObjectForParticipantAndSession(out SessionDataFiles participantDataFilesForSession, ref Participant participant, int sessionNumber)
+        {
+            if (!participant.DataFilesForSession.TryGetValue(sessionNumber, out participantDataFilesForSession))
             {
-                dataFiles = new SessionDataFiles();
-                participant.DataFilesForSession.Add(sessionNumber, dataFiles);
+                participantDataFilesForSession = new SessionDataFiles();
+
+                participant.DataFilesForSession.Add(sessionNumber, participantDataFilesForSession);
             }
 
+        }
+
+        static void SetOrOverwriteGameOrHeadsetDataFileForParticipantAndSession(string file, ref SessionDataFiles participantDataFilesForSession)
+        {
             MFFileType fileType = ParseFileType(file);
             switch (fileType)
             {
                 case MFFileType.GameData:
-                    dataFiles.GameDataFile = file;
+                    participantDataFilesForSession.GameDataFile = file;
                     break;
                 case MFFileType.HeadSetData:
-                    dataFiles.HeadsetDataFile = file;
+                    participantDataFilesForSession.HeadsetDataFile = file;
                     break;
             }
+
         }
+
+  
 
         static string ParseParticipantNumber(string file)
         {
@@ -280,12 +345,13 @@ namespace MFDataParser
         static void ParseDataForSession(out Session session, int sessionNumber, SessionDataFiles sessionDataFiles)
         {
             session = InitializeSession(sessionNumber);
-            InitializeSessionGamesAndStartTimesFromFile(session, sessionDataFiles.GameDataFile);
-            ParseHeadsetDataFor(session, sessionDataFiles.HeadsetDataFile);
+            if (sessionDataFiles.HasBothFiles())
+            {
+                InitializeSessionGamesAndStartTimesFromFile(session, sessionDataFiles.GameDataFile);
+                ParseHeadsetDataFor(session, sessionDataFiles.HeadsetDataFile);
+            }
 
         }
-
-      
 
         static Session InitializeSession(int sessionNumber)
         {
@@ -302,7 +368,9 @@ namespace MFDataParser
 
         static void ParseCSVFileFor(string pathToFile, Action<string[]> lineHandler)
         {
-            StreamReader reader = CreateReaderForFile(pathToFile);
+            StreamReader reader=CreateReaderForFile(pathToFile);
+            
+
             while (!reader.EndOfStream)
             {
                 string[] eventData = reader.ReadLine().Split(',');
@@ -469,7 +537,7 @@ namespace MFDataParser
                 fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite);
             } catch(Exception e)
             {
-                throw new Exception(e.Message + " .Unable to locate: " + filePath + ". Verify that the ParticipantIDToNameAndGroupFile is in the same directory as the A and B directories.");
+                throw new Exception(e.Message + "\n.Unable to locate: " + filePath + ". Verify that the ParticipantIDToNameAndGroupFile is in the same directory as the A and B directories.");
             }
 
             StreamReader reader = new StreamReader(fs);
@@ -510,13 +578,26 @@ namespace MFDataParser
 
         static DateTime ParseDateTime(string timeString)
         {
-            
-            string date = timeString.Substring(0, 8);
-            string time = timeString.Substring(9, 8);
 
-            DateTime dateTime = DateTime.ParseExact(date, "dd-MM-yy", null, System.Globalization.DateTimeStyles.None);
+            string date = DateRegex.Match(timeString).ToString();
+            string time = TimeRegex.Match(timeString).ToString();
 
-            TimeSpan timeSpan = TimeSpan.ParseExact(time, "hh\\:mm\\:ss", null, System.Globalization.TimeSpanStyles.None);
+            DateTime dateTime;
+            if(!DateTime.TryParseExact(date, "dd-MM-yy", null, System.Globalization.DateTimeStyles.None, out dateTime))
+            {
+                if(!DateTime.TryParseExact(date, "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out dateTime)){
+                    throw new FormatException("Unable to parse date from: " + date);
+                }
+            }
+
+            TimeSpan timeSpan;
+            if(!TimeSpan.TryParseExact(time, "hh\\:mm\\:ss", null, out timeSpan))
+            {
+                if (!TimeSpan.TryParseExact(time, "hh\\:mm", null, out timeSpan))
+                {
+                    throw new FormatException("Unable to parse timespan from: " + time);
+                }
+            }
             dateTime = dateTime.Add(timeSpan);
             return dateTime;
 
@@ -574,6 +655,11 @@ class MFEntity
         {
             return "Game Data File: "+GameDataFile+"\n\t\tHeadset Data File: " + HeadsetDataFile;
         }
+
+        public Boolean HasBothFiles()
+        {
+            return GameDataFile != null && HeadsetDataFile != null;
+        }
     }
 
 
@@ -581,7 +667,8 @@ class MFEntity
     class Participant : MFEntity
     {
         public int Id { get; set; }
-        public string Name { get; set; } = "Unknown";
+
+        public string Name { get; set; }
         public int Group { get; set; } = -1;
         public List<Session> Sessions { get; set; }
 
