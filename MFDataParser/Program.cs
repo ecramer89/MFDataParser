@@ -75,15 +75,20 @@ namespace MFDataParser
     class Program
     {
         private const int DURATION_OF_ONE_EVENT = 1;
+        private const string UNKNOWN_PARTICIPANT_PREFIX = "UK";
+        private const string OUTPUT_CSV_COLUMN_HEADINGS = "Name,ID,Group,Session,Game,SecondsPoorSignal,SecondsTotal";
+        private const string OUTPUT_CSV_VALUE_STRING_FORMAT = "{0},{1},{2},{3},{4},{5},{6}";
         static Regex ParticipantIdRegex = new Regex("\\d{10}");
         static Regex HeadsetFileRegex = new Regex("headset");
         static Regex SessionNumberRegex = new Regex("(_)(\\d{1,2})(_)");
         static Regex DateRegex = new Regex("\\d{2,4}-\\d{1,2}-\\d{1,2}");
         static Regex TimeRegex = new Regex("\\d{1,2}:\\d{1,2}(:\\d{0,2})?");
         static Regex DuplicateFileRegex = new Regex("(\\(\\d\\))$");
+        static Regex UnknownParticipantRegex = new Regex(UNKNOWN_PARTICIPANT_PREFIX+"\\d+");
 
         static string OutputFilePath ="C:/Users/root960/Desktop/MFData/Output.csv";
         static string PathToParticipantIdToNameAndGroupFile= "C:/Users/root960/Desktop/MFData/ParticipantIdToNameAndGroup.csv";
+        //nb for dup ids, just add them as additional keys linking to that participant name and data files. then when we sort the sheet it will get sorted out
         static Dictionary<int, ParticipantNameAndGroup> ParticipantNameAndGroupLookup = new Dictionary<int, ParticipantNameAndGroup>();
         static Dictionary<String, Participant> Participants = new Dictionary<string, Participant>();
         static int SerializedUnknownParticipant = 0;
@@ -93,29 +98,50 @@ namespace MFDataParser
             LoadParticipantIDToNameAndGroupData();
             LoadParticipants();
             LoadParticipantsData();
-           // PrintParticipants();
-            WriteParticipantDataToNewCSVFile();
+            WriteParticipantsDataToNewCSVFile();
         }
 
-        static void WriteParticipantDataToNewCSVFile()
+        static void WriteParticipantsDataToNewCSVFile()
         {
-            StringBuilder builder = new StringBuilder();
-            builder.AppendLine("Name,ID,Group,Session,Game,SecondsPoorSignal,SecondsTotal");
+            StringBuilder CSVBuilder = new StringBuilder();
+            CSVBuilder.AppendLine(OUTPUT_CSV_COLUMN_HEADINGS);
             foreach(Participant participant in Participants.Values)
-            {
-                foreach(Session session in participant.Sessions)
+            {   //skip data from participants we couldn't identify
+                if (!UnknownParticipantRegex.IsMatch(participant.Name))
                 {
-                    foreach(SessionGame sessionGame in session.Games)
-                    {
-                        string row = String.Format("{0},{1},{2},{3},{4},{5},{6}", participant.Name, participant.Id, participant.Group, session.Number, sessionGame.Name, sessionGame.SecondsPoorQuality, sessionGame.TotalSeconds);
-                        builder.AppendLine(row);
-                    }
+                    WriteDataForOneParticipantToCSVFile(participant, ref CSVBuilder);
                 }
 
             }
 
-            File.WriteAllText(OutputFilePath, builder.ToString());
+            File.WriteAllText(OutputFilePath, CSVBuilder.ToString());
         }
+
+        static void WriteDataForOneParticipantToCSVFile(Participant participant, ref StringBuilder CSVBuilder)
+        {
+            foreach (Session session in participant.Sessions)
+            {
+                SessionGame last = null;
+                for (int i = session.Games.Count() - 1; i > -1; i--)
+                {
+                    SessionGame current = session.Games.ElementAt(i);
+                    if (WasParticipantsLastAttemptAtGameForThisSession(last, current))
+                    {
+                        string row = String.Format(OUTPUT_CSV_VALUE_STRING_FORMAT, participant.Name, participant.Id, participant.Group, session.Number, current.Name, current.SecondsPoorQuality, current.TotalSeconds);
+                        CSVBuilder.AppendLine(row);
+                        last = current;
+                    }
+                }
+            }
+
+        }
+
+        static bool WasParticipantsLastAttemptAtGameForThisSession(SessionGame last, SessionGame current)
+        {
+            return (last == null || !last.Name.Equals(current.Name)); 
+        }
+
+     
 
 
         static void LoadParticipantIDToNameAndGroupData()
@@ -271,7 +297,7 @@ namespace MFDataParser
                 }
                 else
                 {
-                    participant.Name = "UK" + SerializedUnknownParticipant++;
+                    participant.Name = UNKNOWN_PARTICIPANT_PREFIX + SerializedUnknownParticipant++;
                     Console.WriteLine("Participant ID {0} was not registered in the Id to Name and Group Dictionary.", IdAsInt);
                    
                 }
@@ -394,7 +420,7 @@ namespace MFDataParser
                 EventDataType eventType = EventDataType.EventDataToEventType(eventData);
                 if (eventType == EventDataType.StartGame)
                 {
-                    CreateNewSessionGame(eventData, out currentGame, ref session);
+                    CreateOrOverrwriteSessionGameForSession(eventData, out currentGame, ref session);
 
                     if (state == inNonGameEvent)
                     {
@@ -439,15 +465,26 @@ namespace MFDataParser
             state = 1 - state;
         }
 
-        static void CreateNewSessionGame(string[] eventData, out SessionGame currentGame, ref Session session)
+        static void CreateOrOverrwriteSessionGameForSession(string[] eventData, out SessionGame currentGame, ref Session session)
         {
+            
+
             string gameName = ParseNameOfGameFromGameStartedEvent(eventData);
+
+        
+          
             DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
             SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime };
+            
             session.Games.Add(game);
             currentGame = game;
 
         }
+
+        
+
+      
+
 
         static void ExtendCurrentNonGameEventTimeRangeToCurrentEventTime(ref TimeRange currentNonEventTimeRange, string[] eventData, int pushBackSeconds = 0)
         {
@@ -771,6 +808,19 @@ class MFEntity
             return builder.ToString();
         }
 
+        public override bool Equals(object obj)
+        {
+            if (obj == null || obj.GetType() != GetType()) return false;
+            SessionGame other = (SessionGame)obj;
+            return other.Name.Equals(Name);
+
+        }
+
+        public override int GetHashCode()
+        {
+            return Name.GetHashCode();
+        }
+
     }
 
     class TimeRange
@@ -790,6 +840,8 @@ class MFEntity
         {
             return new TimeSpan(t.Hours- pushBackHours, t.Minutes- pushBackMinutes, t.Seconds- pushBackSeconds);
         }
+
+     
     }
 
   
