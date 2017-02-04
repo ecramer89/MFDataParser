@@ -7,6 +7,10 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Data.Entity;
+
+
+
+
 namespace MFDataParser
 {
    enum MFFileType
@@ -59,9 +63,37 @@ namespace MFDataParser
 
     class GameType
     {
-        public static readonly string Rock="Rock";
-        public static readonly string Pinwheel = "Pinwheel";
-        public static readonly string Paraglider = "Paraglider";
+        //constants are implicitly static
+        private const string RockName = "Rock";
+        private const string PinName = "Pinwheel";
+        private const string ParaName = "Paraglider";
+
+        public static readonly GameType Rock =new GameType(RockName);
+        public static readonly GameType Pinwheel = new GameType(PinName);
+        public static readonly GameType Paraglider = new GameType(ParaName);
+        public string Name { get; }
+        private GameType(string name)
+        {
+            this.Name = name;
+        }
+
+        public static GameType StringToGameType(string gameTypeName)
+        {
+            switch (gameTypeName)
+            {
+                case RockName:
+                    return Rock;
+                   
+                case PinName:
+                    return Pinwheel;
+
+                case ParaName:
+                    return Paraglider;
+
+                default:
+                    return null;
+            }
+        }
     }
 
     class ParticipantNameAndGroup
@@ -121,24 +153,29 @@ namespace MFDataParser
         {
             foreach (Session session in participant.Sessions)
             {
-                SessionGame last = null;
+               
+                HashSet<GameType> recorded = new HashSet<GameType>();
+
                 for (int i = session.Games.Count() - 1; i > -1; i--)
                 {
                     SessionGame current = session.Games.ElementAt(i);
-                    if (WasParticipantsLastAttemptAtGameForThisSession(last, current))
-                    {
+                    GameType currentType = GameType.StringToGameType(current.Name);
+                    if (WasParticipantsLastAttemptAtGameForThisSession(recorded, currentType))
+                    {   
                         string row = String.Format(OUTPUT_CSV_VALUE_STRING_FORMAT, participant.Name, participant.Id, participant.Group, session.Number, current.Name, current.SecondsPoorQuality, current.TotalSeconds);
                         CSVBuilder.AppendLine(row);
-                        last = current;
+                      
+                        recorded.Add(currentType);
+
                     }
                 }
             }
 
         }
 
-        static bool WasParticipantsLastAttemptAtGameForThisSession(SessionGame last, SessionGame current)
+        static bool WasParticipantsLastAttemptAtGameForThisSession(HashSet<GameType> recorded, GameType currentType)
         {
-            return (last == null || !last.Name.Equals(current.Name)); 
+            return !recorded.Contains(currentType);
         }
 
      
@@ -643,7 +680,7 @@ namespace MFDataParser
 
         static void ParseAOrRGivenGame(SessionGame currentGame, string[] headSetData, int idx)
         {
-            int valueIdx = (int)(currentGame.Name == GameType.Rock ? HeadsetDataIndex.Attention : HeadsetDataIndex.Relaxation);
+            int valueIdx = (int)(currentGame.Name == GameType.Rock.Name ? HeadsetDataIndex.Attention : HeadsetDataIndex.Relaxation);
             string dataString = headSetData[valueIdx];
             int value;
             if (Int32.TryParse(dataString.Substring(5, dataString.Length - 5), out value))
