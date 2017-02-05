@@ -23,33 +23,15 @@ namespace MFDataParser
         ID=0, Name=1, Group=2
     }
 
-    class EventDataType
+    enum EventDataType
     {
-        public static readonly EventDataType StartGame = new EventDataType();
-        public static readonly EventDataType InGame = new EventDataType();
-        public static readonly EventDataType NonGame = new EventDataType();
-        
 
-        public static EventDataType EventDataToEventType(string[] eventData)
-        {
-            string eventString = eventData[(int)EventDataIndex.EventType];
-            if (IsStartOfNewGame(eventData, eventString)) return StartGame;
-            if (IsGameEvent(eventString)) return InGame;
-            return NonGame;
+        StartGame = 0, GotToken = 1, Other = 2
 
-        }
-
-
-        static bool IsGameEvent(string eventString)
-        {
-            return eventString.Contains("token");
-        }
-
-        static bool IsStartOfNewGame(string[] eventData, string eventString)
-        {
-            return eventData.Length == 2 && eventString.Contains("started");
-        }
     }
+      
+    
+    
 
     enum EventDataIndex
     {
@@ -447,51 +429,39 @@ namespace MFDataParser
 
         static void InitializeSessionGamesAndStartTimesFromFile(Session session, string pathToGameEventData = "")
         {
-            const int inGameEvent = 0;
-            const int inNonGameEvent = 1;
-            int state = inGameEvent;
+        
             SessionGame currentGame = null;
-            TimeRange currentNonEventTimeRange = null;
+            TimeInterval currentGamePlayTimeInterval = null;
 
 
             Action<string[]> lineHandler = (string[] eventData) =>
             {
-                EventDataType eventType = EventDataType.EventDataToEventType(eventData);
-                if (eventType == EventDataType.StartGame)
+                EventDataType eventType = EventDataToEventType(eventData);
+                switch (eventType)
                 {
-                    CreateSessionGameForSession(eventData, out currentGame, ref session);
+                    case EventDataType.StartGame:
+                        string gameName = ParseNameOfGameFromGameStartedEvent(eventData);
+                            if (IsNewGame(currentGame, gameName))
+                            {
+                                //create new game
+                                SessionGame game = CreateSessionGameForSession(eventData, ref session, gameName);
+                                currentGame = game;
+                            }
+                            //regardless, initialize a new gameplay interval.
+                            currentGamePlayTimeInterval = InitializeNewGameplayInterval(eventData);
+                        break;
 
-                    if (state == inNonGameEvent)
-                    {
-                        ExtendCurrentNonGameEventTimeRangeToCurrentEventTime(ref currentNonEventTimeRange, eventData, pushBackSeconds: DURATION_OF_ONE_EVENT);
-                        ConcludeNonGameTimeIntervalAndAddToCurrentGame(eventData, ref currentGame, ref currentNonEventTimeRange);
-                        ToggleState(ref state);
-                    }
-                }
-                else if (eventType == EventDataType.InGame)
-                {
-                    if (state == inNonGameEvent)
-                    {
-          
-                        ExtendCurrentNonGameEventTimeRangeToCurrentEventTime(ref currentNonEventTimeRange, eventData, pushBackSeconds: DURATION_OF_ONE_EVENT);
-                        ConcludeNonGameTimeIntervalAndAddToCurrentGame(eventData, ref currentGame, ref currentNonEventTimeRange);
-                        ToggleState(ref state);
+                    case EventDataType.GotToken:
+                       
+                        ExtendCurrentGamePlayTimeInterval(ref currentGamePlayTimeInterval, eventData);
+                        break;
 
-                    }
-
+                    case EventDataType.Other:
+                        if(currentGamePlayTimeInterval!=null) currentGame.GamePlayTimeIntervals.Add(currentGamePlayTimeInterval);
+                        currentGamePlayTimeInterval = null;
+                        break;
                 }
-                else if (eventType == EventDataType.NonGame)
-                {
-                    if (state == inGameEvent)
-                    {
-                        BeginAndSaveNewNonGameEventTimeRangeForCurrentGame(eventData, out currentNonEventTimeRange);
-                        ToggleState(ref state);
-                    }
-                    else if (state == inNonGameEvent)
-                    {
-                        ExtendCurrentNonGameEventTimeRangeToCurrentEventTime(ref currentNonEventTimeRange, eventData);
-                    }
-                }
+            
             }; //end delegate definition
 
 
@@ -499,65 +469,72 @@ namespace MFDataParser
 
 
             //print the sessions non game intervals for each game
-            Console.WriteLine("Non-game intervals for Session "+session.Number+": \n");
+            Console.WriteLine("Gameplay intervals for Session "+session.Number+": \n");
             foreach(SessionGame game in session.Games)
             {
                 Console.WriteLine("\t" + game.Name);
-                foreach(TimeRange nonGame in game.NonGameEventTimeRanges)
+                foreach(TimeInterval nonGame in game.GamePlayTimeIntervals)
                 {
                     Console.WriteLine("\t" + nonGame.ToString());
                 }
             }
         }
+
+        static bool IsNewGame(SessionGame currentGame, string newGameName)
+        {
+            return currentGame == null || newGameName != currentGame.Name;
+        }
+
+        static EventDataType EventDataToEventType(string[] eventData)
+        {
+            string eventString = eventData[(int)EventDataIndex.EventType];
+            if (IsStartOfNewGame(eventData, eventString)) return EventDataType.StartGame;
+            if (IsGotTokenEvent(eventString)) return EventDataType.GotToken;
+            return EventDataType.Other;
+
+        }
+
+
+        static bool IsGotTokenEvent(string eventString)
+        {
+            return eventString.Contains("token");
+        }
+
+        static bool IsStartOfNewGame(string[] eventData, string eventString)
+        {
+            return eventData.Length == 2 && eventString.Contains("started");
+        }
+
+
+
+
+        static SessionGame CreateSessionGameForSession(string[] eventData, ref Session session, string gameName)
+        {
            
-
-        static void ToggleState(ref int state)
-        {
-            state = 1 - state;
-        }
-
-        static void CreateSessionGameForSession(string[] eventData, out SessionGame currentGame, ref Session session)
-        {
-            
-
-            string gameName = ParseNameOfGameFromGameStartedEvent(eventData);
-
-        
-          
             DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
-            SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime };
-            
+            SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime }; 
             session.Games.Add(game);
-            currentGame = game;
+            return game;
 
         }
 
-        
+   
 
-      
-
-
-        static void ExtendCurrentNonGameEventTimeRangeToCurrentEventTime(ref TimeRange currentNonEventTimeRange, string[] eventData, int pushBackSeconds = 0)
+        static void ExtendCurrentGamePlayTimeInterval(ref TimeInterval currentGameplayTimeInterval, string[] eventData, int pushBackSeconds = 0)
         {
             TimeSpan timeOfNewEvent = ParseDateTime(eventData[(int)EventDataIndex.EventTime]).TimeOfDay;
-            currentNonEventTimeRange.End = timeOfNewEvent.CloneToSeconds(pushBackSeconds: pushBackSeconds);
+            currentGameplayTimeInterval.End = timeOfNewEvent.CloneToSeconds(pushBackSeconds: pushBackSeconds);
    
         }
 
-        static void BeginAndSaveNewNonGameEventTimeRangeForCurrentGame(string[] eventData, out TimeRange currentNonEventTimeRange)
+        static TimeInterval InitializeNewGameplayInterval(string[] eventData)
         {
             TimeSpan eventTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]).TimeOfDay;
-            currentNonEventTimeRange = new TimeRange { Start = eventTime, End = eventTime.CloneToSeconds() };
+            return new TimeInterval { Start = eventTime, End = eventTime.CloneToSeconds() };
 
         }
 
-        static void ConcludeNonGameTimeIntervalAndAddToCurrentGame(string[] eventData, ref SessionGame currentGame, ref TimeRange currentNonEventTimeRange)
-        {
-            
-            currentGame.NonGameEventTimeRanges.Add(currentNonEventTimeRange);
-        }
-
-     
+    
 
         static string ParseNameOfGameFromGameStartedEvent(string[] eventData)
         {
@@ -605,16 +582,16 @@ namespace MFDataParser
         static bool RowRepresentsTrueGamePlayAndNotNavigationOrRestart(SessionGame currentGame, DateTime timeOfEvent)
         {
             
-            foreach(TimeRange rangeOfNonGameEvent in currentGame.NonGameEventTimeRanges)
+            foreach(TimeInterval gameplayTimeInterval in currentGame.GamePlayTimeIntervals)
             {
-                if (timeOfEvent.TimeOfDay > rangeOfNonGameEvent.Start && timeOfEvent.TimeOfDay < rangeOfNonGameEvent.End)
+                if (timeOfEvent.TimeOfDay >= gameplayTimeInterval.Start && timeOfEvent.TimeOfDay <= gameplayTimeInterval.End)
                 {
-                    return false;
+                    return true;
 
 
                 }
             }
-            return true;
+            return false;
         }
 
         static StreamReader CreateReaderForFile(string filePath)
@@ -843,21 +820,9 @@ class MFEntity
         public int SecondsPoorQuality { get; set; }
         public int TotalSeconds { get; set; }
         public int SecondsGoodQuality { get { return TotalSeconds - SecondsPoorQuality; } }
-        public HashSet<TimeRange> NonGameEventTimeRanges = new HashSet<TimeRange>();
+        public HashSet<TimeInterval> GamePlayTimeIntervals = new HashSet<TimeInterval>();
 
-        public override string ToString()
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.Append(base.ToString());
-            builder.Append("\nNon Game Event Time Ranges:");
-            foreach(TimeRange tr in NonGameEventTimeRanges)
-            {
-                builder.Append("\n");
-                builder.Append(tr.ToString());
-
-            }
-            return builder.ToString();
-        }
+    
 
         public override bool Equals(object obj)
         {
@@ -874,7 +839,7 @@ class MFEntity
 
     }
 
-    class TimeRange
+    class TimeInterval
     {
         public TimeSpan Start { get; set; }
         public TimeSpan End { get; set; }
