@@ -458,7 +458,13 @@ namespace MFDataParser
                         break;
 
                     case EventDataType.GotToken:
-                       
+
+                        //if we re-entered gameplay directly after an interruption 
+                        if (currentGamePlayTimeInterval == null)
+                        {   
+                            currentGamePlayTimeInterval = InitializeNewGameplayInterval(eventData);
+                        }
+
                         ExtendCurrentGamePlayTimeInterval(ref currentGamePlayTimeInterval, eventData);
                         break;
 
@@ -565,29 +571,35 @@ namespace MFDataParser
                     GetNextGame(ref currentGame, ref currentGameIdx, session);
                 }
 
+                //only count data for good quality gameplay trials.
                 if (RowRepresentsTrueGamePlayAndNotNavigationOrRestart(currentGame, timeOfEvent)) {
                     if (SignalQualityIsGood(headSetData))
                     {
                         ParseAOrRGivenGame(currentGame, headSetData, currentGameIdx);
+
                     } else
                     {
                         currentGame.SecondsPoorQuality++;
                     }
                     //total time computed empirically; from from time ranges
                     currentGame.TotalSeconds++;
+
+                    //for testing
                     headSetData[1] = currentGame.Name;
 
                 } else
-                {
+                {    //for testing
                     headSetData[1] = "";
                     
                 }
+                //for testing
                 trackedNonGamePlayRows.AppendLine(String.Join(",", headSetData));
             };
 
         
 
             ParseCSVFileFor(pathToHeadsetData, lineHandler);
+            //for testing
             File.WriteAllText("C:/Users/root960/Desktop/MFData/nongame"+session.Number+".csv", trackedNonGamePlayRows.ToString());
 
         }
