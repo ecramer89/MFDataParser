@@ -106,10 +106,12 @@ namespace MFDataParser
 
     class Program
     {
+        static bool TESTING = true;
         private const int DURATION_OF_ONE_EVENT = 1;
         private const string UNKNOWN_PARTICIPANT_PREFIX = "UK";
         private const string OUTPUT_CSV_COLUMN_HEADINGS = "Name,ID,Group,Session,Game,SecondsPoorSignal,SecondsTotal";
         private const string OUTPUT_CSV_VALUE_STRING_FORMAT = "{0},{1},{2},{3},{4},{5},{6}";
+        static string INPUT_DATA_FILE_DIRECTORY_PATH = "C:/Users/root960/Desktop/MFData/"+(TESTING? "testSet" : "files");
         static Regex ParticipantIdRegex = new Regex("\\d{10}");
         static Regex HeadsetFileRegex = new Regex("headset");
         static Regex SessionNumberRegex = new Regex("(_)(\\d{1,2})(_)");
@@ -118,7 +120,7 @@ namespace MFDataParser
         static Regex DuplicateFileRegex = new Regex("(\\(\\d\\))$");
         static Regex UnknownParticipantRegex = new Regex(UNKNOWN_PARTICIPANT_PREFIX+"\\d+");
 
-        static string OutputFilePath ="C:/Users/root960/Desktop/MFData/Output.csv";
+        static string OutputFilePath = "C:/Users/root960/Desktop/MFData/"+(TESTING? "TestOutput" : "Output")+".csv";
         static string PathToParticipantIdToNameAndGroupFile= "C:/Users/root960/Desktop/MFData/ParticipantIdToNameAndGroup.csv";
         //nb for dup ids, just add them as additional keys linking to that participant name and data files. then when we sort the sheet it will get sorted out
         static Dictionary<int, ParticipantNameAndGroup> ParticipantNameAndGroupLookup = new Dictionary<int, ParticipantNameAndGroup>();
@@ -256,7 +258,7 @@ namespace MFDataParser
           
             try
             {
-                files = Directory.GetFiles("C:/Users/root960/Desktop/MFData/files");
+                files = Directory.GetFiles(INPUT_DATA_FILE_DIRECTORY_PATH);
                 Console.WriteLine("Number of files: "+files.Count());
             }
             catch (Exception e)
@@ -457,7 +459,7 @@ namespace MFDataParser
                 EventDataType eventType = EventDataType.EventDataToEventType(eventData);
                 if (eventType == EventDataType.StartGame)
                 {
-                    CreateOrOverrwriteSessionGameForSession(eventData, out currentGame, ref session);
+                    CreateSessionGameForSession(eventData, out currentGame, ref session);
 
                     if (state == inNonGameEvent)
                     {
@@ -494,6 +496,18 @@ namespace MFDataParser
 
 
             ParseCSVFileFor(pathToGameEventData, lineHandler);
+
+
+            //print the sessions non game intervals for each game
+            Console.WriteLine("Non-game intervals for Session "+session.Number+": \n");
+            foreach(SessionGame game in session.Games)
+            {
+                Console.WriteLine("\t" + game.Name);
+                foreach(TimeRange nonGame in game.NonGameEventTimeRanges)
+                {
+                    Console.WriteLine("\t" + nonGame.ToString());
+                }
+            }
         }
            
 
@@ -502,7 +516,7 @@ namespace MFDataParser
             state = 1 - state;
         }
 
-        static void CreateOrOverrwriteSessionGameForSession(string[] eventData, out SessionGame currentGame, ref Session session)
+        static void CreateSessionGameForSession(string[] eventData, out SessionGame currentGame, ref Session session)
         {
             
 
