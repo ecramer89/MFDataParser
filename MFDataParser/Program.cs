@@ -94,6 +94,8 @@ namespace MFDataParser
         private const string OUTPUT_CSV_COLUMN_HEADINGS = "Name,ID,Group,Session,Game,SecondsPoorSignal,SecondsTotal";
         private const string OUTPUT_CSV_VALUE_STRING_FORMAT = "{0},{1},{2},{3},{4},{5},{6}";
         static string INPUT_DATA_FILE_DIRECTORY_PATH = "C:/Users/root960/Desktop/MFData/"+(TESTING? "testSet" : "files");
+
+
         static Regex ParticipantIdRegex = new Regex("\\d{10}");
         static Regex HeadsetFileRegex = new Regex("headset");
         static Regex SessionNumberRegex = new Regex("(_)(\\d{1,2})(_)");
@@ -101,13 +103,14 @@ namespace MFDataParser
         static Regex TimeRegex = new Regex("\\d{1,2}:\\d{1,2}(:\\d{0,2})?");
         static Regex DuplicateFileRegex = new Regex("(\\(\\d\\))$");
         static Regex UnknownParticipantRegex = new Regex(UNKNOWN_PARTICIPANT_PREFIX+"\\d+");
+        static Regex SignalQualityRegex = new Regex("\\d{1,3}$");
 
         static string OutputFilePath = "C:/Users/root960/Desktop/MFData/"+(TESTING? "TestOutput" : "Output")+".csv";
         static string PathToParticipantIdToNameAndGroupFile= "C:/Users/root960/Desktop/MFData/ParticipantIdToNameAndGroup.csv";
         //nb for dup ids, just add them as additional keys linking to that participant name and data files. then when we sort the sheet it will get sorted out
         static Dictionary<int, ParticipantNameAndGroup> ParticipantNameAndGroupLookup = new Dictionary<int, ParticipantNameAndGroup>();
         static Dictionary<String, Participant> Participants = new Dictionary<string, Participant>();
-        static int SerializedUnknownParticipant = 0;
+        static int UnknownParticipantSerialId = 0;
 
         static void Main(string[] args)
         {
@@ -318,7 +321,7 @@ namespace MFDataParser
                 }
                 else
                 {
-                    participant.Name = UNKNOWN_PARTICIPANT_PREFIX + SerializedUnknownParticipant++;
+                    participant.Name = UNKNOWN_PARTICIPANT_PREFIX + UnknownParticipantSerialId++;
                     Console.WriteLine("Participant ID {0} was not registered in the Id to Name and Group Dictionary.", IdAsInt);
                    
                 }
@@ -448,6 +451,8 @@ namespace MFDataParser
                                 currentGame = game;
                             }
                             //regardless, initialize a new gameplay interval.
+                            //(a session of one game can be interrupted, but we should consider the games continuous not replacements and
+                            //should pick up if the game continues following interruption)
                             currentGamePlayTimeInterval = InitializeNewGameplayInterval(eventData);
                         break;
 
@@ -541,15 +546,17 @@ namespace MFDataParser
             return eventData[(int)EventDataIndex.EventType].Split(' ')[0];
         }
 
-    
 
+       
         static void ParseHeadsetDataFor(Session session, string pathToHeadsetData)
         {
              int currentGameIdx = 0;
              SessionGame currentGame = session.Games[currentGameIdx];
-          
+           
+                StringBuilder trackedNonGamePlayRows = new StringBuilder();
+            
             Action<string[]> lineHandler = (string[] headSetData) => {
-
+                
                 DateTime timeOfEvent = ParseDateTime(headSetData[(int)HeadsetDataIndex.EventTime]);
 
                 if (AtNextGame(timeOfEvent, session, currentGame, currentGameIdx))
@@ -567,12 +574,20 @@ namespace MFDataParser
                     }
                     //total time computed empirically; from from time ranges
                     currentGame.TotalSeconds++;
-                } 
+                    headSetData[1] = currentGame.Name;
+
+                } else
+                {
+                    headSetData[1] = "";
+                    
+                }
+                trackedNonGamePlayRows.AppendLine(String.Join(",", headSetData));
             };
 
         
 
             ParseCSVFileFor(pathToHeadsetData, lineHandler);
+            File.WriteAllText("C:/Users/root960/Desktop/MFData/nongame"+session.Number+".csv", trackedNonGamePlayRows.ToString());
 
         }
 
@@ -631,12 +646,14 @@ namespace MFDataParser
         static bool DataIsReliable(string[] headSetData)
         {
             string signalQualityString = headSetData[(int)HeadsetDataIndex.SignalQuality];
-            signalQualityString = signalQualityString.Substring(9, signalQualityString.Length - 9);
+            signalQualityString = SignalQualityRegex.Match(signalQualityString).ToString();
+
+
             int quality;
             if(Int32.TryParse(signalQualityString, out quality))
             {
                 return quality == 0;
-            } throw new FormatException("Unable to read signal quality value.");
+            } throw new FormatException("Unable to read signal quality value: "+signalQualityString);
 
         }
 
