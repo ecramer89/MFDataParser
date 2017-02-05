@@ -93,6 +93,7 @@ namespace MFDataParser
         private const string UNKNOWN_PARTICIPANT_PREFIX = "UK";
         private const string OUTPUT_CSV_COLUMN_HEADINGS = "Name,ID,Group,Session,Game,SecondsPoorSignal,SecondsTotal";
         private const string OUTPUT_CSV_VALUE_STRING_FORMAT = "{0},{1},{2},{3},{4},{5},{6}";
+        private const int GOOD_SIGNAL_QUALITY_VALUE = 0;
         static string INPUT_DATA_FILE_DIRECTORY_PATH = "C:/Users/root960/Desktop/MFData/"+(TESTING? "testSet" : "files");
 
 
@@ -565,7 +566,7 @@ namespace MFDataParser
                 }
 
                 if (RowRepresentsTrueGamePlayAndNotNavigationOrRestart(currentGame, timeOfEvent)) {
-                    if (DataIsReliable(headSetData))
+                    if (SignalQualityIsGood(headSetData))
                     {
                         ParseAOrRGivenGame(currentGame, headSetData, currentGameIdx);
                     } else
@@ -643,7 +644,7 @@ namespace MFDataParser
             currentGame = session.Games[++idx];
         }
 
-        static bool DataIsReliable(string[] headSetData)
+        static bool SignalQualityIsGood(string[] headSetData)
         {
             string signalQualityString = headSetData[(int)HeadsetDataIndex.SignalQuality];
             signalQualityString = SignalQualityRegex.Match(signalQualityString).ToString();
@@ -652,7 +653,7 @@ namespace MFDataParser
             int quality;
             if(Int32.TryParse(signalQualityString, out quality))
             {
-                return quality == 0;
+                return quality == GOOD_SIGNAL_QUALITY_VALUE;
             } throw new FormatException("Unable to read signal quality value: "+signalQualityString);
 
         }
