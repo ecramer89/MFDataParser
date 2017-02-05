@@ -13,6 +13,9 @@ using System.Data.Entity;
 
 namespace MFDataParser
 {
+
+   
+
    enum MFFileType
     {
         GameData=0, HeadSetData=1
@@ -30,8 +33,7 @@ namespace MFDataParser
 
     }
       
-    
-    
+   
 
     enum EventDataIndex
     {
@@ -46,30 +48,38 @@ namespace MFDataParser
     class GameType
     {
         //constants are implicitly static
-        private const string RockName = "Rock";
-        private const string PinName = "Pinwheel";
-        private const string ParaName = "Paraglider";
+        private const int DEFAULT_AR_THRESHOLD = 40;
+        private const string ROCK_NAME = "Rock";
+        private const string PINWHEEL_NAME = "Pinwheel";
+        private const string PARAGLIDER_NAME = "Paraglider";
 
-        public static readonly GameType Rock =new GameType(RockName);
-        public static readonly GameType Pinwheel = new GameType(PinName);
-        public static readonly GameType Paraglider = new GameType(ParaName);
+        public static readonly GameType Rock =new GameType(ROCK_NAME, DEFAULT_AR_THRESHOLD, HeadsetDataIndex.Attention);
+        public static readonly GameType Pinwheel = new GameType(PINWHEEL_NAME, DEFAULT_AR_THRESHOLD, HeadsetDataIndex.Relaxation);
+        public static readonly GameType Paraglider = new GameType(PARAGLIDER_NAME, DEFAULT_AR_THRESHOLD, HeadsetDataIndex.Relaxation);
+
+
         public string Name { get; }
-        private GameType(string name)
+        public int ThresholdAR { get; }
+        public HeadsetDataIndex ARValueIdx { get; }
+
+        private GameType(string name, int thresholdAR, HeadsetDataIndex ARValueIdx)
         {
             this.Name = name;
+            this.ThresholdAR = thresholdAR;
+            this.ARValueIdx = ARValueIdx;
         }
 
         public static GameType StringToGameType(string gameTypeName)
         {
             switch (gameTypeName)
             {
-                case RockName:
+                case ROCK_NAME:
                     return Rock;
                    
-                case PinName:
+                case PINWHEEL_NAME:
                     return Pinwheel;
 
-                case ParaName:
+                case PARAGLIDER_NAME:
                     return Paraglider;
 
                 default:
@@ -88,11 +98,11 @@ namespace MFDataParser
 
     class Program
     {
-        static bool TESTING = true;
+        static bool TESTING = false;
         private const int DURATION_OF_ONE_EVENT = 1;
         private const string UNKNOWN_PARTICIPANT_PREFIX = "UK";
-        private const string OUTPUT_CSV_COLUMN_HEADINGS = "Name,ID,Group,Session,Game,SecondsPoorSignal,SecondsTotal";
-        private const string OUTPUT_CSV_VALUE_STRING_FORMAT = "{0},{1},{2},{3},{4},{5},{6}";
+        static string[] OUTPUT_CSV_COLUMN_HEADINGS = new string[] { "Name", "ID", "Group", "Session", "Game", "SecondsPoorSignal", "MAR", "PAR" };
+        static string OUTPUT_CSV_VALUE_STRING_FORMAT = "";
         private const int GOOD_SIGNAL_QUALITY_VALUE = 0;
         static string INPUT_DATA_FILE_DIRECTORY_PATH = "C:/Users/root960/Desktop/MFData/"+(TESTING? "testSet" : "files");
 
@@ -118,13 +128,29 @@ namespace MFDataParser
             LoadParticipantIDToNameAndGroupData();
             LoadParticipants();
             LoadParticipantsData();
+            GenerateOutputDataFormatFromHeadings();
             WriteParticipantsDataToNewCSVFile();
+        }
+
+        static void GenerateOutputDataFormatFromHeadings()
+        {
+            StringBuilder builder = new StringBuilder();
+       
+            for(int i=0; i< OUTPUT_CSV_COLUMN_HEADINGS.Count(); i++)
+            {
+                builder.Append("{");
+                builder.Append(i);
+                builder.Append("}");
+                builder.Append(",");
+            }
+
+            OUTPUT_CSV_VALUE_STRING_FORMAT = builder.ToString();
         }
 
         static void WriteParticipantsDataToNewCSVFile()
         {
             StringBuilder CSVBuilder = new StringBuilder();
-            CSVBuilder.AppendLine(OUTPUT_CSV_COLUMN_HEADINGS);
+            CSVBuilder.AppendLine(String.Join(",",OUTPUT_CSV_COLUMN_HEADINGS));
             foreach(Participant participant in Participants.Values)
             {   //skip data from participants we couldn't identify
                 if (!UnknownParticipantRegex.IsMatch(participant.Name))
@@ -150,7 +176,7 @@ namespace MFDataParser
                     GameType currentType = GameType.StringToGameType(current.Name);
                     if (WasParticipantsLastAttemptAtGameForThisSession(recorded, currentType))
                     {   
-                        string row = String.Format(OUTPUT_CSV_VALUE_STRING_FORMAT, participant.Name, participant.Id, participant.Group, session.Number, current.Name, current.SecondsPoorQuality, current.TotalSeconds);
+                        string row = String.Format(OUTPUT_CSV_VALUE_STRING_FORMAT, participant.Name, participant.Id, participant.Group, session.Number, current.Name, current.SecondsPoorQuality, current.MAR, current.PAR);
                         CSVBuilder.AppendLine(row);
                       
                         recorded.Add(currentType);
@@ -524,7 +550,8 @@ namespace MFDataParser
         {
            
             DateTime gameStartTime = ParseDateTime(eventData[(int)EventDataIndex.EventTime]);
-            SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime }; 
+            GameType type = GameType.StringToGameType(gameName);
+            SessionGame game = new SessionGame { Name = gameName, StartTime = gameStartTime, Type = type }; 
             session.Games.Add(game);
             return game;
 
@@ -560,7 +587,7 @@ namespace MFDataParser
              int currentGameIdx = 0;
              SessionGame currentGame = session.Games[currentGameIdx];
            
-                StringBuilder trackedNonGamePlayRows = new StringBuilder();
+             StringBuilder trackedNonGamePlayRows = new StringBuilder();
             
             Action<string[]> lineHandler = (string[] headSetData) => {
                 
@@ -575,7 +602,11 @@ namespace MFDataParser
                 if (RowRepresentsTrueGamePlayAndNotNavigationOrRestart(currentGame, timeOfEvent)) {
                     if (SignalQualityIsGood(headSetData))
                     {
-                        ParseAOrRGivenGame(currentGame, headSetData, currentGameIdx);
+                        
+                        int ARValue = ParseAOrRGivenGame(currentGame, headSetData, currentGameIdx);
+                        UpdateMARSum(ARValue, ref currentGame);
+                        UpdatePARSum(ARValue, ref currentGame);
+
 
                     } else
                     {
@@ -593,15 +624,33 @@ namespace MFDataParser
                     
                 }
                 //for testing
-                trackedNonGamePlayRows.AppendLine(String.Join(",", headSetData));
+                if (TESTING)
+                {
+                    trackedNonGamePlayRows.AppendLine(String.Join(",", headSetData));
+                }
             };
 
         
 
             ParseCSVFileFor(pathToHeadsetData, lineHandler);
             //for testing
-            File.WriteAllText("C:/Users/root960/Desktop/MFData/nongame"+session.Number+".csv", trackedNonGamePlayRows.ToString());
+            if (TESTING)
+            {
+                File.WriteAllText("C:/Users/root960/Desktop/MFData/nongame" + session.Number + ".csv", trackedNonGamePlayRows.ToString());
+            }
+        }
 
+        static void UpdatePARSum(int aRValue, ref SessionGame currentGame)
+        {
+            currentGame.MARSum += aRValue;
+        }
+
+        static void UpdateMARSum(int aRValue, ref SessionGame currentGame)
+        {
+            if(currentGame.Type.ThresholdAR <= aRValue)
+            {
+                currentGame.PARSum++;
+            }
         }
 
         /*Need to check if in a time range because the game does not log individual rows (seconds) for each non game event
@@ -699,15 +748,17 @@ namespace MFDataParser
         }
 
 
-        static void ParseAOrRGivenGame(SessionGame currentGame, string[] headSetData, int idx)
+
+        static int ParseAOrRGivenGame(SessionGame currentGame, string[] headSetData, int idx)
         {
-            int valueIdx = (int)(currentGame.Name == GameType.Rock.Name ? HeadsetDataIndex.Attention : HeadsetDataIndex.Relaxation);
-            string dataString = headSetData[valueIdx];
-            int value;
-            if (Int32.TryParse(dataString.Substring(5, dataString.Length - 5), out value))
-               {
-                currentGame.MARSum += value;
-               }
+            int valueIdx = (int)(currentGame.Type.ARValueIdx);
+            string ARValueString = headSetData[valueIdx];
+            int ARValue;
+            if (Int32.TryParse(ARValueString.Substring(5, ARValueString.Length - 5), out ARValue))
+            {
+                return ARValue;
+            }
+            else throw new FormatException("Error- unable to parse R or A value: " + ARValueString);
         }   
     }
 
@@ -841,11 +892,12 @@ class MFEntity
     {
         public int Id { get; set; }
         public DateTime StartTime { get; set; }
+        public GameType Type { get; set; }
         public string Name { get; set;}
         public int MARSum { get; set; }
         public int MAR { get { return (SecondsGoodQuality > 0 ? MARSum / SecondsGoodQuality : 0); } }
-        public int PARSum { get; set; }
-        public double PAR { get; set; }
+        public double PARSum { get; set; }
+        public double PAR { get { return (SecondsGoodQuality > 0 ? PARSum / (double)SecondsGoodQuality : 0); } }
         public int TT { get; set; }
         public int SecondsPoorQuality { get; set; }
         public int TotalSeconds { get; set; }
